@@ -21,7 +21,7 @@ function formatBirthday(birthday: string): string {
 }
 
 export default function ProfileScreen() {
-  const { me, serverUrl, signOut } = useSession();
+  const { me, signOut } = useSession();
   const nav = useNav();
   const insets = useSafeAreaInsets();
 
@@ -52,9 +52,6 @@ export default function ProfileScreen() {
         </View>
 
         <DoodleCard seed={9} style={{ marginTop: 16 }}>
-          <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.fadedInk }}>
-            Server: {serverUrl}
-          </Text>
           <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.fadedInk, marginTop: 2 }}>
             App version {Application.nativeApplicationVersion} (build {Application.nativeBuildVersion})
           </Text>

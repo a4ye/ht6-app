@@ -14,7 +14,7 @@ type Session = {
   token: string | null;
   me: Me | null;
   api: Api;
-  signIn: (serverUrl: string, token: string, me: Me) => void;
+  signIn: (token: string, me: Me) => void;
   signOut: () => void;
   setMe: (me: Me) => void;
   refreshMe: () => Promise<void>;
@@ -22,9 +22,13 @@ type Session = {
 
 const Ctx = createContext<Session | null>(null);
 
+// The server is fixed: everyone talks to the hosted instance. Persisted
+// serverUrl overrides from older builds are deliberately ignored so stale
+// installs migrate to the public server automatically.
+const serverUrl = DEFAULT_SERVER;
+
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
-  const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER);
   const [token, setToken] = useState<string | null>(null);
   const [me, setMeState] = useState<Me | null>(null);
 
@@ -33,7 +37,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       .then((raw) => {
         if (raw) {
           const s = JSON.parse(raw);
-          if (s.serverUrl) setServerUrl(s.serverUrl);
           if (s.token) setToken(s.token);
           if (s.me) setMeState(s.me);
         }
@@ -42,27 +45,26 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setReady(true));
   }, []);
 
-  const persist = useCallback((s: { serverUrl: string; token: string | null; me: Me | null }) => {
+  const persist = useCallback((s: { token: string | null; me: Me | null }) => {
     AsyncStorage.setItem(KEY, JSON.stringify(s)).catch(() => {});
   }, []);
 
-  const signIn = useCallback((url: string, t: string, m: Me) => {
-    setServerUrl(url);
+  const signIn = useCallback((t: string, m: Me) => {
     setToken(t);
     setMeState(m);
-    persist({ serverUrl: url, token: t, me: m });
+    persist({ token: t, me: m });
   }, [persist]);
 
   const signOut = useCallback(() => {
     setToken(null);
     setMeState(null);
-    persist({ serverUrl, token: null, me: null });
-  }, [persist, serverUrl]);
+    persist({ token: null, me: null });
+  }, [persist]);
 
   const setMe = useCallback((m: Me) => {
     setMeState(m);
-    persist({ serverUrl, token, me: m });
-  }, [persist, serverUrl, token]);
+    persist({ token, me: m });
+  }, [persist, token]);
 
   const api = useMemo(() => makeApi(serverUrl, token), [serverUrl, token]);
 

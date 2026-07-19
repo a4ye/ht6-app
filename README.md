@@ -43,9 +43,9 @@ npm install
 node index.js        # listens on :4000, SQLite in server/data/
 ```
 
-The app's default server is `https://ht6.icinoxis.net`, editable on the sign-in
-screen — point it at `http://<your-ip>:4000` for local development. Anyone who
-should use the app together must point at the same server.
+The app always talks to `https://ht6.icinoxis.net` (`DEFAULT_SERVER` in
+`src/state/session.tsx` — change it there for local development against
+`http://<your-ip>:4000`). There is no in-app server picker.
 
 ## Build the app
 

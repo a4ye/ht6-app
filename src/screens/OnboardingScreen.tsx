@@ -43,7 +43,6 @@ export default function OnboardingScreen() {
   const { signIn } = useSession();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<'register' | 'login'>('register');
-  const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER);
   const [username, setUsername] = useState('');
   const [name, setName] = useState('');
   const [bd, setBd] = useState({ y: '', m: '', d: '' });
@@ -56,8 +55,7 @@ export default function OnboardingScreen() {
   const submit = async () => {
     setError(null);
     setBusy(true);
-    const url = serverUrl.trim().replace(/\/$/, '');
-    const api = makeApi(url, null);
+    const api = makeApi(DEFAULT_SERVER, null);
     try {
       if (mode === 'register') {
         const birthday = `${bd.y.padStart(4, '0')}-${bd.m.padStart(2, '0')}-${bd.d.padStart(2, '0')}`;
@@ -69,10 +67,10 @@ export default function OnboardingScreen() {
           color,
           species,
         });
-        signIn(url, res.token, res.me);
+        signIn(res.token, res.me);
       } else {
         const res = await api.login({ username: username.trim().toLowerCase(), password });
-        signIn(url, res.token, res.me);
+        signIn(res.token, res.me);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
@@ -198,13 +196,6 @@ export default function OnboardingScreen() {
               </View>
             </>
           )}
-
-          <Label>Server</Label>
-          <TextInput
-            value={serverUrl} onChangeText={setServerUrl} autoCapitalize="none"
-            placeholder="https://ht6.icinoxis.net" placeholderTextColor={C.fadedInk}
-            style={inputStyle}
-          />
 
           {error && (
             <Text style={{ fontFamily: F.body, fontSize: 13.5, color: C.redPin, marginTop: 10 }}>
