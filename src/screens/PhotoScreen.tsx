@@ -76,7 +76,7 @@ export default function PhotoScreen({ hangoutId }: { hangoutId: number }) {
             <View
               style={{
                 width: '92%', aspectRatio: 3 / 4, borderWidth: 3, borderColor: C.darkInk,
-                borderRadius: 8, overflow: 'hidden', backgroundColor: '#EFE8D8',
+                borderRadius: 4, overflow: 'hidden', backgroundColor: '#EFE8D8',
                 alignItems: 'center', justifyContent: 'center',
               }}
             >

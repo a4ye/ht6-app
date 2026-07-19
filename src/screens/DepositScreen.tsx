@@ -56,8 +56,8 @@ export default function DepositScreen() {
               placeholder="0.00"
               placeholderTextColor={C.fadedInk}
               style={{
-                flex: 1, backgroundColor: C.white, borderWidth: 2.5, borderColor: '#E0C48E',
-                borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9,
+                flex: 1, backgroundColor: C.white, borderWidth: 2.5, borderColor: '#C89A62',
+                borderRadius: 6, paddingHorizontal: 12, paddingVertical: 9,
                 fontFamily: F.display, fontSize: 18, color: C.darkInk,
               }}
             />
@@ -76,9 +76,9 @@ export default function DepositScreen() {
               <Pressable key={q} onPress={() => setQuota(q)} style={{ flex: 1 }}>
                 <View
                   style={{
-                    alignItems: 'center', marginHorizontal: 3, paddingVertical: 10, borderRadius: 12,
+                    alignItems: 'center', marginHorizontal: 3, paddingVertical: 10, borderRadius: 6,
                     backgroundColor: quota === q ? C.yellow : C.white,
-                    borderWidth: 2.5, borderColor: quota === q ? C.brown : '#E0C48E',
+                    borderWidth: 2.5, borderColor: quota === q ? C.brown : '#C89A62',
                   }}
                 >
                   <Text style={{ fontFamily: F.display, fontSize: 17, color: C.darkInk }}>{q}</Text>

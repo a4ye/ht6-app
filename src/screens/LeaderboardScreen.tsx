@@ -64,7 +64,7 @@ export default function LeaderboardScreen() {
             <Text style={{ fontFamily: F.display, fontSize: 20, color: C.brown, width: 34 }}>
               {i + 1}
             </Text>
-            <Avatar color={r.color} equipped={r.equipped} size={44} />
+            <Avatar color={r.color} species={r.species} equipped={r.equipped} size={44} />
             <View style={{ flex: 1, marginLeft: 10 }}>
               <Text style={{ fontFamily: F.display, fontSize: 15, color: C.darkInk }}>
                 {r.isMe ? 'You' : r.name}

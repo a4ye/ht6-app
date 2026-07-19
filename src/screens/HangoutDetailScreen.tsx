@@ -87,7 +87,7 @@ export default function HangoutDetailScreen({ hangoutId }: { hangoutId: number }
           <View style={{ flexDirection: 'row', marginTop: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
             {h.members.map((m) => (
               <View key={m.username} style={{ alignItems: 'center', marginHorizontal: 8, marginBottom: 4 }}>
-                <Avatar color={m.color} equipped={m.equipped} size={52} />
+                <Avatar color={m.color} species={m.species} equipped={m.equipped} size={52} />
                 <Text style={{ fontFamily: F.body, fontSize: 12, color: C.darkInk }}>
                   {m.username === me?.username ? 'You' : m.name}
                 </Text>
@@ -145,7 +145,7 @@ export default function HangoutDetailScreen({ hangoutId }: { hangoutId: number }
                 key={`${a.username}-${b.username}`}
                 style={{
                   flexDirection: 'row', alignItems: 'center', paddingVertical: 7,
-                  borderTopWidth: 1.5, borderTopColor: '#EADFC6',
+                  borderTopWidth: 1.5, borderTopColor: '#DCC49A',
                 }}
               >
                 <Text style={{ flex: 1, fontFamily: F.body, fontSize: 14, color: C.darkInk }}>

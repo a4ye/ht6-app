@@ -100,6 +100,7 @@ export default function App() {
     Baloo2_800ExtraBold,
     Baloo2_700Bold,
     Delius_400Regular,
+    SproutPixel: require('./assets/fonts/SproutPixel.ttf'),
   });
 
   if (!fontsLoaded) {

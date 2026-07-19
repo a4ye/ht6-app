@@ -1,7 +1,10 @@
 import React, { useMemo } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Image, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Svg, { G, Path } from 'react-native-svg';
 import { wob } from '../theme';
+
+const ACORN = require('../../assets/world/acorn.png');
+const SPROUTS = require('../../assets/world/sprouts.png');
 
 function Acorn({ color, bg }: { color: string; bg: string }) {
   return (
@@ -51,13 +54,24 @@ export default function YardBackground({ bg, tint, seed = 3 }: { bg: string; tin
 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: bg }]} pointerEvents="none">
-      <Svg width={width} height={height}>
-        {items.map((p, i) => (
-          <G key={i} transform={`translate(${p.x} ${p.y}) rotate(${p.rot}) scale(${p.s})`}>
-            {p.leaf ? <Leaf color={tint} bg={bg} /> : <Acorn color={tint} bg={bg} />}
-          </G>
-        ))}
-      </Svg>
+      {items.map((p, i) => {
+        const size = 34 * p.s;
+        return (
+          <Image
+            key={i}
+            source={p.leaf ? SPROUTS : ACORN}
+            style={{
+              position: 'absolute',
+              left: p.x - size / 2,
+              top: p.y - size / 2,
+              width: size,
+              height: size,
+              opacity: 0.3,
+            }}
+            resizeMode="stretch"
+          />
+        );
+      })}
     </View>
   );
 }

@@ -44,12 +44,15 @@ async function call<T>(
 
 export function makeApi(serverUrl: string, token: string | null) {
   return {
-    register: (b: { username: string; name: string; birthday: string; password: string; color: string }) =>
+    register: (b: {
+      username: string; name: string; birthday: string; password: string;
+      color: string; species: string;
+    }) =>
       call<{ token: string; me: Me }>(serverUrl, null, 'POST', '/auth/register', b),
     login: (b: { username: string; password: string }) =>
       call<{ token: string; me: Me }>(serverUrl, null, 'POST', '/auth/login', b),
     me: () => call<{ me: Me }>(serverUrl, token, 'GET', '/me'),
-    setAvatar: (b: { color: string; equipped: string[] }) =>
+    setAvatar: (b: { color: string; equipped: string[]; species: string }) =>
       call<{ me: Me }>(serverUrl, token, 'PUT', '/me/avatar', b),
     catalog: () =>
       call<{ activities: Activity[]; items: WardrobeItem[]; holidays: Holiday[] }>(

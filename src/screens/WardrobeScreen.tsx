@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AcornPill, { AcornIcon } from '../components/Acorn';
-import Avatar from '../components/Avatar';
+import Avatar, { SPECIES } from '../components/Avatar';
 import { DoodleCard } from '../components/Doodle';
 import YardBackground from '../components/YardBackground';
 import TopBar from '../components/TopBar';
@@ -24,9 +24,9 @@ export default function WardrobeScreen() {
 
   if (!me) return null;
 
-  const saveAvatar = async (color: string, equipped: string[]) => {
+  const saveAvatar = async (color: string, equipped: string[], species: string) => {
     try {
-      const { me: m } = await api.setAvatar({ color, equipped });
+      const { me: m } = await api.setAvatar({ color, equipped, species });
       setMe(m);
     } catch (e) {
       setNotice(e instanceof Error ? e.message : 'Could not save');
@@ -37,7 +37,7 @@ export default function WardrobeScreen() {
     const next = me.equipped.includes(id)
       ? me.equipped.filter((x) => x !== id)
       : [...me.equipped, id];
-    saveAvatar(me.color, next);
+    saveAvatar(me.color, next, me.species);
   };
 
   const buy = async (item: WardrobeItem) => {
@@ -60,14 +60,29 @@ export default function WardrobeScreen() {
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
         <DoodleCard seed={2} style={{ alignItems: 'center' }}>
-          <Avatar color={me.color} equipped={me.equipped} size={130} />
+          <Avatar color={me.color} species={me.species} equipped={me.equipped} size={130} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 4 }}>
+            {SPECIES.map((s) => (
+              <Pressable key={s} onPress={() => saveAvatar(me.color, me.equipped, s)}>
+                <View
+                  style={{
+                    margin: 2, padding: 2, borderRadius: 6,
+                    backgroundColor: me.species === s ? C.yellow : 'transparent',
+                    borderWidth: 2.5, borderColor: me.species === s ? C.brown : 'transparent',
+                  }}
+                >
+                  <Avatar color={me.color} species={s} size={40} />
+                </View>
+              </Pressable>
+            ))}
+          </View>
           <View style={{ flexDirection: 'row', marginTop: 6 }}>
             {COLORS.map((c) => (
-              <Pressable key={c} onPress={() => saveAvatar(c, me.equipped)}>
+              <Pressable key={c} onPress={() => saveAvatar(c, me.equipped, me.species)}>
                 <View
                   style={{
                     width: 30, height: 30, borderRadius: 15, margin: 3, backgroundColor: c,
-                    borderWidth: 3, borderColor: me.color === c ? C.darkInk : '#CBD8A0',
+                    borderWidth: 3, borderColor: me.color === c ? C.darkInk : '#C89A62',
                   }}
                 />
               </Pressable>
@@ -94,7 +109,7 @@ export default function WardrobeScreen() {
             const equipped = me.equipped.includes(item.id);
             return (
               <DoodleCard key={item.id} seed={i * 5 + 7} style={{ width: '48%', marginBottom: 12, alignItems: 'center' }}>
-                <Avatar color="#EFE8D8" equipped={[item.id]} size={76} />
+                <Avatar color="#EFE8D8" species={me.species} equipped={[item.id]} size={76} />
                 <Text style={{ fontFamily: F.display, fontSize: 14, color: C.darkInk, marginTop: 2 }}>
                   {item.name}
                 </Text>
@@ -103,8 +118,8 @@ export default function WardrobeScreen() {
                     <View
                       style={{
                         backgroundColor: equipped ? C.yellow : C.white,
-                        borderWidth: 2.5, borderColor: equipped ? C.brown : '#CBD8A0',
-                        borderRadius: 12, paddingVertical: 6, paddingHorizontal: 16,
+                        borderWidth: 2.5, borderColor: equipped ? C.brown : '#C89A62',
+                        borderRadius: 6, paddingVertical: 6, paddingHorizontal: 16,
                       }}
                     >
                       <Text style={{ fontFamily: F.display, fontSize: 13, color: C.darkInk }}>
@@ -122,7 +137,7 @@ export default function WardrobeScreen() {
                       style={{
                         flexDirection: 'row', alignItems: 'center',
                         backgroundColor: C.white, borderWidth: 2.5, borderColor: C.orange,
-                        borderRadius: 12, paddingVertical: 6, paddingHorizontal: 14,
+                        borderRadius: 6, paddingVertical: 6, paddingHorizontal: 14,
                       }}
                     >
                       <AcornIcon size={16} />
