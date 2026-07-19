@@ -1,6 +1,8 @@
 // Treasury outbound transfers. "Withdraw" = Unifold routes cross-chain and pays the gas.
+import { randomUUID } from 'node:crypto';
 import { MIN_WITHDRAW_UNITS, TREASURY_ACCOUNT_ID } from './config.js';
 import { unifold } from './unifold.js';
+import { withUserLock } from './locks.js';
 import {
   getUser,
   debitBalance,
@@ -34,64 +36,78 @@ export async function withdraw(
   status: string;
   balanceUnits: string;
 }> {
-  const user = getUser(externalUserId);
-  if (!user) {
-    throw new ValidationError('user not found');
-  }
+  // Serialize the whole validate -> debit -> transfer body per user so two
+  // concurrent withdraws can't both pass the balance check and double-spend.
+  return withUserLock(externalUserId, async () => {
+    const user = getUser(externalUserId);
+    if (!user) {
+      throw new ValidationError('user not found');
+    }
 
-  if (typeof amountUnits !== 'string' || !isPositiveIntString(amountUnits)) {
-    throw new ValidationError('amountUnits must be a positive integer string');
-  }
-  if (BigInt(amountUnits) < BigInt(MIN_WITHDRAW_UNITS)) {
-    throw new ValidationError(
-      `amountUnits must be >= ${MIN_WITHDRAW_UNITS} (3 USDC minimum)`,
-    );
-  }
-  if (BigInt(amountUnits) > BigInt(user.balanceUnits)) {
-    throw new ValidationError('amountUnits exceeds available balance');
-  }
-  if (
-    !destination ||
-    typeof destination.recipient_address !== 'string' ||
-    destination.recipient_address.trim() === ''
-  ) {
-    throw new ValidationError('recipient_address is required');
-  }
+    if (typeof amountUnits !== 'string' || !isPositiveIntString(amountUnits)) {
+      throw new ValidationError('amountUnits must be a positive integer string');
+    }
+    if (BigInt(amountUnits) < BigInt(MIN_WITHDRAW_UNITS)) {
+      throw new ValidationError(
+        `amountUnits must be >= ${MIN_WITHDRAW_UNITS} (3 USDC minimum)`,
+      );
+    }
+    if (BigInt(amountUnits) > BigInt(user.balanceUnits)) {
+      throw new ValidationError('amountUnits exceeds available balance');
+    }
+    if (
+      !destination ||
+      typeof destination.recipient_address !== 'string' ||
+      destination.recipient_address.trim() === ''
+    ) {
+      throw new ValidationError('recipient_address is required');
+    }
 
-  const withdrawalId = `${externalUserId}-wd-${user.withdrawals.length + 1}`;
+    // Random id doubles as the Unifold idempotencyKey — concurrent/retried
+    // withdraws never collide (match events.ts: `wd_${randomUUID()}`).
+    const withdrawalId = `wd_${randomUUID()}`;
 
-  // Any error from here on is a Unifold error -> HTTP 500, balance NOT deducted.
-  const t = await unifold.treasury.outboundTransfers.create(
-    {
-      source: {
-        treasury_account_id: TREASURY_ACCOUNT_ID,
-        currency: 'usdc',
-        chain_id: '8453' as '8453' | '137',
-      },
+    // Debit BEFORE the transfer so a crash can't leave a sent transfer un-debited.
+    debitBalance(externalUserId, amountUnits);
+
+    let t;
+    try {
+      t = await unifold.treasury.outboundTransfers.create(
+        {
+          source: {
+            treasury_account_id: TREASURY_ACCOUNT_ID,
+            currency: 'usdc',
+            chain_id: '8453' as '8453' | '137',
+          },
+          destination,
+          amount: amountUnits,
+          external_user_id: externalUserId,
+        },
+        { idempotencyKey: withdrawalId },
+      );
+    } catch (err) {
+      // Unifold error -> HTTP 500, balance NOT deducted: roll back and rethrow.
+      creditBalance(externalUserId, amountUnits);
+      throw err;
+    }
+
+    addWithdrawal(externalUserId, {
+      id: withdrawalId,
+      transferId: t.id,
+      amountUnits,
       destination,
-      amount: amountUnits,
-      external_user_id: externalUserId,
-    },
-    { idempotencyKey: withdrawalId },
-  );
+      status: t.status,
+      refunded: false,
+      createdAt: new Date().toISOString(),
+    });
 
-  debitBalance(externalUserId, amountUnits);
-  addWithdrawal(externalUserId, {
-    id: withdrawalId,
-    transferId: t.id,
-    amountUnits,
-    destination,
-    status: t.status,
-    refunded: false,
-    createdAt: new Date().toISOString(),
+    return {
+      withdrawalId,
+      transferId: t.id,
+      status: t.status,
+      balanceUnits: getUser(externalUserId)!.balanceUnits,
+    };
   });
-
-  return {
-    withdrawalId,
-    transferId: t.id,
-    status: t.status,
-    balanceUnits: getUser(externalUserId)!.balanceUnits,
-  };
 }
 
 export async function pollWithdrawal(withdrawalId: string): Promise<{

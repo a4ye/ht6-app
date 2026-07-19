@@ -209,8 +209,8 @@ describe('deposit credit (poll-based)', () => {
       {
         id: 'exec_1',
         status: 'succeeded',
-        destinationChainId: '8453',
-        destinationAmountBaseUnit: '4000000', // $4 USDC
+        destination_chain_id: '8453',
+        destination_amount_base_unit: '4000000', // $4 USDC
       },
     ];
     const r1 = await refreshDeposits(id);
@@ -226,7 +226,7 @@ describe('deposit credit (poll-based)', () => {
   test('ignores deposits on other chains', async () => {
     const id = newUser();
     depositExecutions = [
-      { id: 'exec_2', status: 'succeeded', destinationChainId: '1', destinationAmountBaseUnit: '9000000' },
+      { id: 'exec_2', status: 'succeeded', destination_chain_id: '1', destination_amount_base_unit: '9000000' },
     ];
     const r = await refreshDeposits(id);
     assert.equal(r.creditedUnits, '0');

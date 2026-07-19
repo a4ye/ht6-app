@@ -104,6 +104,14 @@ app.post('/grant', async (req: Request, res: Response) => {
   }
 });
 
+// The `deposit:<execId>` reference namespace is reserved for internal deposit
+// crediting (deposits.ts/webhooks.ts call adjust() with it directly). Untrusted
+// callers must not be able to write into it, or they could pre-register a
+// victim's future deposit ref and cause the real deposit to be dropped.
+function isReservedReference(reference: string): boolean {
+  return reference.toLowerCase().startsWith('deposit:');
+}
+
 // External-input monthly credit/debit. `deltaUnits` is a signed integer string
 // (e.g. "4000000" to add 4 USDC, "-3000000" to take 3 USDC). Balance floors at 0.
 // Optional `reference` makes a given adjustment idempotent (e.g. a "2026-07" tag).
@@ -114,6 +122,10 @@ app.post('/adjust', (req: Request, res: Response) => {
   }
   if (typeof deltaUnits !== 'string' || !/^-?\d+$/.test(deltaUnits)) {
     return res.status(400).json({ ok: false, error: 'deltaUnits must be a signed integer string' });
+  }
+  // Guard the internal deposit namespace at the untrusted route boundary.
+  if (typeof reference === 'string' && isReservedReference(reference)) {
+    return res.status(400).json({ ok: false, error: 'reference uses a reserved prefix' });
   }
   if (!getUser(externalUserId)) {
     return res.status(404).json({ ok: false, error: 'user not found' });

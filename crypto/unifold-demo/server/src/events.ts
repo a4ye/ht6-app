@@ -5,12 +5,12 @@ import { randomUUID } from 'node:crypto';
 import {
   getUser,
   debitBalance,
-  creditBalance,
   getEvent,
   createEvent as storeCreateEvent,
   saveEvents,
   type EventItem,
 } from './store.js';
+import { adjust } from './adjust.js';
 import { ValidationError, isPositiveIntString } from './withdraw.js';
 import { CREDIT_LIMIT_UNITS } from './config.js';
 
@@ -43,8 +43,19 @@ export function createHangout(
   if (!isPositiveIntString(stakeUnits)) {
     throw new ValidationError('stakeUnits must be a positive integer string');
   }
-  // multiplier is a holiday bonus only — never below 1x.
-  const multiplierBps = Math.max(10000, Math.floor(opts?.multiplierBps ?? 10000));
+  // multiplier is a holiday bonus only — 1x (10000) up to the 1.5x holiday cap (15000).
+  // The bonus is net-new treasury money, so an unbounded multiplier would mint balance.
+  let multiplierBps = 10000;
+  if (opts?.multiplierBps !== undefined) {
+    multiplierBps = opts.multiplierBps;
+    if (
+      !Number.isInteger(multiplierBps) ||
+      multiplierBps < 10000 ||
+      multiplierBps > 15000
+    ) {
+      throw new ValidationError('multiplierBps must be an integer between 10000 and 15000');
+    }
+  }
 
   const ev: EventItem = {
     id: `evt_${randomUUID()}`,
@@ -107,7 +118,8 @@ export function settle(eventId: string): SettleResult {
   if (attendees.length === 0) {
     let refunded = 0n;
     for (const r of ev.rsvps) {
-      creditBalance(r.userId, r.stakedUnits);
+      // Idempotent credit: a replay after a crash short-circuits per (event,user).
+      adjust(r.userId, r.stakedUnits, `settle:${ev.id}:${r.userId}`);
       r.status = 'refunded';
       r.payoutUnits = r.stakedUnits;
       refunded += BigInt(r.stakedUnits);
@@ -132,7 +144,8 @@ export function settle(eventId: string): SettleResult {
     // Holiday multiplier bonus (net-new, funded from the treasury).
     const bonus = (base * BigInt(ev.multiplierBps - 10000)) / 10000n;
     const total = base + bonus;
-    creditBalance(r.userId, total.toString());
+    // Idempotent credit: a replay after a crash short-circuits per (event,user).
+    adjust(r.userId, total.toString(), `settle:${ev.id}:${r.userId}`);
     r.payoutUnits = total.toString();
   });
   // Redistribution must be exactly conservative: own stakes + forfeit pool, no more.

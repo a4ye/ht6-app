@@ -29,8 +29,8 @@ export async function refreshDeposits(externalUserId: string): Promise<{
 
   for (const ex of list.data ?? []) {
     // Only credit USDC-on-Base deposits — that's what /add-funds routes to.
-    if (String(ex.destinationChainId) !== String(CHAIN_ID)) continue;
-    const amount = ex.destinationAmountBaseUnit;
+    if (String(ex.destination_chain_id) !== String(CHAIN_ID)) continue;
+    const amount = ex.destination_amount_base_unit;
     if (typeof amount !== 'string' || !/^[0-9]+$/.test(amount) || BigInt(amount) <= 0n) continue;
 
     const ref = `deposit:${String(ex.id)}`;

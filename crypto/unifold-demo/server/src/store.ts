@@ -1,6 +1,15 @@
 // In-memory user store with JSON persistence.
 // Balances are USDC base-unit strings; math is done on BigInt.
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  renameSync,
+  openSync,
+  fsyncSync,
+  closeSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CREDIT_LIMIT_UNITS } from './config.js';
@@ -38,29 +47,55 @@ const DATA_FILE = join(DATA_DIR, 'users.json');
 
 const users = new Map<string, User>();
 
-function load(): void {
+// Atomic durable write: write to a same-directory temp file, fsync it, then
+// rename over the target (rename is atomic on POSIX). This guarantees a reader
+// never sees a truncated file even if we're OOM-killed/redeployed mid-write.
+function atomicWrite(file: string, data: string): void {
+  mkdirSync(DATA_DIR, { recursive: true });
+  const tmp = `${file}.tmp`;
+  const fd = openSync(tmp, 'w');
   try {
-    if (existsSync(DATA_FILE)) {
-      const raw = readFileSync(DATA_FILE, 'utf8');
-      const parsed = JSON.parse(raw) as User[];
-      for (const u of parsed) {
-        users.set(u.externalUserId, {
-          externalUserId: u.externalUserId,
-          balanceUnits: u.balanceUnits ?? '0',
-          lastGrantPeriod: u.lastGrantPeriod ?? null,
-          withdrawals: u.withdrawals ?? [],
-          references: u.references ?? [],
-        });
-      }
-    }
+    writeFileSync(fd, data, 'utf8');
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(tmp, file);
+}
+
+function load(): void {
+  // Missing file == first run: start empty. But a file that EXISTS yet fails to
+  // parse is a corrupt/truncated ledger, not "no data" — refuse to boot rather
+  // than silently zero every balance while the real USDC sits in the treasury.
+  if (!existsSync(DATA_FILE)) return;
+  const raw = readFileSync(DATA_FILE, 'utf8');
+  if (raw.trim() === '') return;
+  let parsed: User[];
+  try {
+    parsed = JSON.parse(raw) as User[];
   } catch (err) {
-    console.error('[store] failed to load users.json, starting empty:', err);
+    throw new Error(
+      `[store] users.json exists but is corrupt/unparseable; refusing to boot with a zeroed ledger: ${String(err)}`,
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      '[store] users.json exists but is not a JSON array; refusing to boot with a zeroed ledger',
+    );
+  }
+  for (const u of parsed) {
+    users.set(u.externalUserId, {
+      externalUserId: u.externalUserId,
+      balanceUnits: u.balanceUnits ?? '0',
+      lastGrantPeriod: u.lastGrantPeriod ?? null,
+      withdrawals: u.withdrawals ?? [],
+      references: u.references ?? [],
+    });
   }
 }
 
 function persist(): void {
-  mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(DATA_FILE, JSON.stringify([...users.values()], null, 2), 'utf8');
+  atomicWrite(DATA_FILE, JSON.stringify([...users.values()], null, 2));
 }
 
 load();
@@ -95,7 +130,12 @@ export function creditBalance(externalUserId: string, units: string): void {
 export function debitBalance(externalUserId: string, units: string): void {
   const user = users.get(externalUserId);
   if (!user) return;
-  user.balanceUnits = (BigInt(user.balanceUnits) - BigInt(units)).toString();
+  const next = BigInt(user.balanceUnits) - BigInt(units);
+  // Defense in depth: callers must validate first; never drive balance negative.
+  if (next < 0n) {
+    throw new Error('debitBalance would drive balance below 0');
+  }
+  user.balanceUnits = next.toString();
   persist();
 }
 
@@ -209,19 +249,30 @@ const events = new Map<string, EventItem>();
 const EVENTS_FILE = join(DATA_DIR, 'events.json');
 
 function loadEvents(): void {
+  // Missing file == first run: start empty. A file that EXISTS yet fails to
+  // parse is a corrupt/truncated ledger (staked balances live here) — refuse to
+  // boot rather than silently drop every event's held stakes.
+  if (!existsSync(EVENTS_FILE)) return;
+  const raw = readFileSync(EVENTS_FILE, 'utf8');
+  if (raw.trim() === '') return;
+  let parsed: EventItem[];
   try {
-    if (existsSync(EVENTS_FILE)) {
-      const parsed = JSON.parse(readFileSync(EVENTS_FILE, 'utf8')) as EventItem[];
-      for (const e of parsed) events.set(e.id, e);
-    }
+    parsed = JSON.parse(raw) as EventItem[];
   } catch (err) {
-    console.error('[store] failed to load events.json, starting empty:', err);
+    throw new Error(
+      `[store] events.json exists but is corrupt/unparseable; refusing to boot with a zeroed ledger: ${String(err)}`,
+    );
   }
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      '[store] events.json exists but is not a JSON array; refusing to boot with a zeroed ledger',
+    );
+  }
+  for (const e of parsed) events.set(e.id, e);
 }
 
 function persistEvents(): void {
-  mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(EVENTS_FILE, JSON.stringify([...events.values()], null, 2), 'utf8');
+  atomicWrite(EVENTS_FILE, JSON.stringify([...events.values()], null, 2));
 }
 
 loadEvents();
