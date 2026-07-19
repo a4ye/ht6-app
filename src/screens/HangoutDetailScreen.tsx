@@ -7,6 +7,7 @@ import OutlinedText from '../components/OutlinedText';
 import YardBackground from '../components/YardBackground';
 import Polaroid from '../components/Polaroid';
 import TopBar from '../components/TopBar';
+import { fmtUsd } from '../money';
 import { useNav } from '../state/nav';
 import { useSession } from '../state/session';
 import { C, F } from '../theme';
@@ -20,9 +21,37 @@ export default function HangoutDetailScreen({ hangoutId }: { hangoutId: number }
   const [h, setH] = useState<Hangout | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [stakeMsg, setStakeMsg] = useState<string | null>(null);
 
   const load = useCallback(() => {
     return api.hangout(hangoutId).then((r) => setH(r.hangout)).catch((e) => setError(e.message));
+  }, [api, hangoutId]);
+
+  const doStake = useCallback(async () => {
+    setBusy(true);
+    setStakeMsg(null);
+    try {
+      const r = await api.stakeHangout(hangoutId);
+      setH(r.hangout);
+    } catch (e) {
+      setStakeMsg(e instanceof Error ? e.message : 'Could not stake');
+    } finally {
+      setBusy(false);
+    }
+  }, [api, hangoutId]);
+
+  const doSettle = useCallback(async () => {
+    setBusy(true);
+    setStakeMsg(null);
+    try {
+      const r = await api.settleHangout(hangoutId);
+      setH(r.hangout);
+    } catch (e) {
+      setStakeMsg(e instanceof Error ? e.message : 'Could not settle');
+    } finally {
+      setBusy(false);
+    }
   }, [api, hangoutId]);
 
   // reload when returning from the photo or confirm screens
@@ -95,6 +124,80 @@ export default function HangoutDetailScreen({ hangoutId }: { hangoutId: number }
             ))}
           </View>
         </DoodleCard>
+
+        {/* stake pool */}
+        {h.stake && (
+          <>
+            <View style={{ marginTop: 16, marginBottom: 6 }}>
+              <OutlinedText size={20} color={C.labelOrange} outline={C.white} thickness={2}>
+                {h.stake.settled ? 'Payout' : 'The pool'}
+              </OutlinedText>
+            </View>
+            <DoodleCard seed={4}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ fontFamily: F.display, fontSize: 15, color: C.darkInk }}>
+                  {fmtUsd(h.stake.stakeUnits)} each
+                </Text>
+                <Text style={{ fontFamily: F.display, fontSize: 18, color: C.labelGreen }}>
+                  {fmtUsd(h.stake.poolUnits)} pool
+                </Text>
+              </View>
+              <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.brown, marginTop: 2, marginBottom: 6 }}>
+                {h.stake.settled
+                  ? 'Flakers lost their stake to the friends who showed.'
+                  : 'Show up to get your stake back. Flake and it goes to the others.'}
+              </Text>
+              {h.stake.members.map((sm) => {
+                const mem = h.members.find((m) => m.username === sm.username);
+                const label = sm.username === me?.username ? 'You' : mem?.name ?? sm.username;
+                let right: React.ReactNode;
+                if (h.stake!.settled) {
+                  const color = sm.settleStatus === 'flaked' ? C.redPin : C.labelGreen;
+                  right = (
+                    <Text style={{ fontFamily: F.display, fontSize: 13, color }}>
+                      {sm.settleStatus === 'flaked' ? 'flaked -' : '+'}{fmtUsd(sm.payoutUnits)}
+                    </Text>
+                  );
+                } else {
+                  right = (
+                    <Text style={{ fontFamily: F.display, fontSize: 13, color: sm.staked ? C.labelGreen : C.fadedInk }}>
+                      {sm.staked ? 'staked' : 'not in yet'}
+                    </Text>
+                  );
+                }
+                return (
+                  <View key={sm.username}
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6,
+                      borderTopWidth: 1.5, borderTopColor: '#DCC49A' }}>
+                    <Text style={{ flex: 1, fontFamily: F.body, fontSize: 14, color: C.darkInk }}>{label}</Text>
+                    {right}
+                  </View>
+                );
+              })}
+              {!h.stake.settled && !h.stake.iStaked && (
+                <View style={{ marginTop: 10 }}>
+                  <DoodleButton
+                    label={busy ? 'Staking' : `Stake ${fmtUsd(h.stake.stakeUnits)} to join`}
+                    bg={C.yellow} border={C.brown} seed={8} disabled={busy}
+                    onPress={doStake}
+                  />
+                </View>
+              )}
+              {!h.stake.settled && started && (
+                <View style={{ marginTop: 10 }}>
+                  <DoodleButton
+                    label={busy ? 'Settling' : 'Settle the pool'}
+                    seed={10} disabled={busy}
+                    onPress={doSettle}
+                  />
+                </View>
+              )}
+              {stakeMsg && (
+                <Text style={{ fontFamily: F.body, fontSize: 13, color: C.redPin, marginTop: 8 }}>{stakeMsg}</Text>
+              )}
+            </DoodleCard>
+          </>
+        )}
 
         {/* photo */}
         <View style={{ marginTop: 16, marginBottom: 6 }}>

@@ -53,6 +53,21 @@ export type WardrobeItem = { id: string; name: string; price: number; type?: 'ac
 
 export type Holiday = { month: number; day: number; label: string };
 
+export type StakeMember = {
+  username: string;
+  staked: boolean;
+  settleStatus: 'attended' | 'flaked' | 'refunded' | null;
+  payoutUnits: string | null;
+};
+
+export type HangoutStake = {
+  stakeUnits: string; // USDC base units (6 decimals)
+  settled: boolean;
+  poolUnits: string;
+  members: StakeMember[];
+  iStaked: boolean;
+};
+
 export type Hangout = {
   id: number;
   activity: string;
@@ -66,6 +81,15 @@ export type Hangout = {
   members: PublicUser[];
   confirmedPairs: [string, string][];
   pairsTotal: number;
+  stake: HangoutStake | null;
+};
+
+export type Wallet = {
+  enabled: boolean;
+  balanceUnits?: string;
+  readyToCashOut?: boolean;
+  cashoutThresholdUnits?: string;
+  withdrawals?: { id: string; amountUnits: string; status: string }[];
 };
 
 export type Route =

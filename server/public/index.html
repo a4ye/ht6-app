@@ -41,6 +41,7 @@ body{
 img,svg{display:block}
 a{color:inherit;text-decoration:none}
 .px{image-rendering:pixelated}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .scene{
   position:relative;
   min-height:100vh;
@@ -74,6 +75,64 @@ a{color:inherit;text-decoration:none}
   text-align:center;
   padding:0 5vw;
   z-index:6;
+}
+/* ============ giant wordmark footer ============ */
+.bigmark{
+  position:relative;
+  background:var(--tan);
+  border-top:5px solid var(--dark);
+  padding-top:34px;
+  overflow:clip;
+  text-align:center;
+  isolation:isolate;
+}
+.foot-links{
+  position:relative;z-index:3;
+  display:flex;flex-wrap:wrap;gap:10px 20px;
+  align-items:center;justify-content:center;
+  padding:0 5vw 20px;
+  font-size:clamp(.82rem,3.4vw,1rem);color:var(--ink);
+}
+.foot-links a{text-decoration:underline;text-underline-offset:3px}
+.foot-links a:hover{color:var(--orange)}
+.foot-links .dot{color:var(--faded)}
+.foot-credit{
+  position:relative;z-index:3;text-align:center;
+  color:var(--faded);font-size:clamp(.8rem,3.2vw,.95rem);
+  padding:0 5vw 22px;
+}
+/* faint acorn/leaf motif behind the mark */
+.mark-bg{
+  position:absolute;inset:0;z-index:0;opacity:.45;pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cg fill='%23E4C480'%3E%3Cpath d='M45 28h6v24h-6z M36 37h24v6h-24z'/%3E%3Crect x='150' y='150' width='6' height='6'/%3E%3Crect x='120' y='40' width='6' height='6'/%3E%3C/g%3E%3C/svg%3E");
+}
+/* the giant name, its bottom clipped by the container edge */
+.mark{
+  position:relative;z-index:2;
+  font-family:"SproutPixel","Courier New",monospace;
+  font-weight:400;
+  line-height:.74;
+  letter-spacing:0;
+  user-select:none;
+}
+.mark span{
+  display:block;white-space:nowrap;
+  /* fills the width edge-to-edge; overflow:clip on .bigmark hides any hair past it */
+  font-size:clamp(2.6rem,18vw,14rem);
+  background:linear-gradient(180deg,#F4B657 0%,#E8A33D 52%,#F0C93F 100%);
+  background-size:100% 220%;
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+  filter:drop-shadow(4px 5px 0 rgba(74,64,49,.92));
+}
+/* clip a thin slice off the bottom of the last row against the page edge */
+.mark span:last-child{margin-bottom:-.08em}
+@media (max-width:460px){
+  .foot-links{font-size:.78rem;gap:5px 11px;padding-bottom:16px}
+}
+@media (prefers-reduced-motion: no-preference){
+  .mark span{animation:markShine 6s ease-in-out infinite}
+  @keyframes markShine{0%,100%{background-position:0 0}50%{background-position:0 100%}}
 }
 /* ============ sprite buttons (9-slice) ============ */
 .pbtn{
@@ -730,10 +789,20 @@ a{color:inherit;text-decoration:none}
     <img class="prop px" style="top:20px;left:52%;width:44px" src="px/world/sprouts.png" alt="" aria-hidden="true">
     <img class="decal px" style="top:38px;left:16%;width:60px" src="px/world/decal2.png" alt="" aria-hidden="true">
   </div>
-
-  <p class="credit">made at Hack the 6ix</p>
 </section>
 </main>
+
+<footer class="bigmark">
+  <div class="mark-bg" aria-hidden="true"></div>
+  <nav class="foot-links">
+    <a href="/apk" download>Download</a>
+    <span class="dot" aria-hidden="true">·</span>
+    <a href="https://ht6-app.icinoxis.net">Web version</a>
+  </nav>
+  <p class="foot-credit">Made at Hack the 6ix</p>
+  <div class="mark" aria-hidden="true"><span>TOMO</span><span>YARD</span></div>
+  <h2 class="sr-only">Tomo Yard</h2>
+</footer>
 
 <!-- keep pressed button sprites warm so :active never flickers -->
 <div style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">

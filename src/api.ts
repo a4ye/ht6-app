@@ -1,6 +1,7 @@
 import { FileSystemUploadType, uploadAsync } from 'expo-file-system/legacy';
 import {
-  Activity, FriendCard, FriendProfile, FriendView, Hangout, Holiday, Me, PublicUser, Suggestion, WardrobeItem,
+  Activity, FriendCard, FriendProfile, FriendView, Hangout, Holiday, Me, PublicUser,
+  Suggestion, Wallet, WardrobeItem,
 } from './types';
 
 export class ApiError extends Error {
@@ -80,10 +81,27 @@ export function makeApi(serverUrl: string, token: string | null) {
         serverUrl, token, 'GET', `/activities/ranked?with=${withUsernames.join(',')}`),
     duel: (winner: string, loser: string) =>
       call<{ ok: boolean }>(serverUrl, token, 'POST', '/duels', { winner, loser }),
-    createHangout: (b: { activity: string; date: string; place: string; friendUsernames: string[] }) =>
+    createHangout: (b: {
+      activity: string; date: string; place: string; friendUsernames: string[];
+      stakeUnits?: string;
+    }) =>
       call<{ hangout: Hangout }>(serverUrl, token, 'POST', '/hangouts', b),
     hangouts: () => call<{ hangouts: Hangout[] }>(serverUrl, token, 'GET', '/hangouts'),
     hangout: (id: number) => call<{ hangout: Hangout }>(serverUrl, token, 'GET', `/hangouts/${id}`),
+    stakeHangout: (id: number) =>
+      call<{ hangout: Hangout }>(serverUrl, token, 'POST', `/hangouts/${id}/stake`),
+    settleHangout: (id: number) =>
+      call<{ hangout: Hangout }>(serverUrl, token, 'POST', `/hangouts/${id}/settle`),
+    wallet: () => call<Wallet>(serverUrl, token, 'GET', '/wallet'),
+    addFunds: () =>
+      call<{ treasuryAddress?: string; depositAddresses?: unknown }>(
+        serverUrl, token, 'POST', '/wallet/add-funds'),
+    refreshDeposits: () =>
+      call<{ creditedUnits?: string; balanceUnits?: string }>(serverUrl, token, 'POST', '/wallet/refresh'),
+    withdraw: (amountUnits: string, destination: {
+      chain_type: string; chain_id: string; token_address: string; recipient_address: string;
+    }) => call<{ ok: boolean; status?: string; balanceUnits?: string }>(
+      serverUrl, token, 'POST', '/wallet/withdraw', { amountUnits, destination }),
     uploadPhoto: async (id: number, uri: string) => {
       let res;
       try {
