@@ -6,7 +6,7 @@ import { Api, makeApi } from '../api';
 import { Me } from '../types';
 
 const KEY = 'ty:session:v1';
-export const DEFAULT_SERVER = 'http://100.66.193.176:4000';
+export const DEFAULT_SERVER = 'https://ht6.icinoxis.net';
 
 type Session = {
   ready: boolean;
