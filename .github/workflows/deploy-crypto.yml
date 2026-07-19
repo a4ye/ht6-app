@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "crypto/unifold-demo/server/**"
+      - "custody/**"
       - ".github/workflows/deploy-crypto.yml"
   workflow_dispatch:
 
@@ -17,7 +17,7 @@ concurrency:
 
 env:
   AZURE_WEBAPP_NAME: ht6-tomoyard-crypto
-  CRYPTO_SERVER_DIR: crypto/unifold-demo/server
+  CRYPTO_SERVER_DIR: custody
   NODE_VERSION: "22.x"
 
 jobs:
@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: crypto/unifold-demo/server/package-lock.json
+          cache-dependency-path: custody/package-lock.json
 
       - name: Install, test, and build
         working-directory: ${{ env.CRYPTO_SERVER_DIR }}

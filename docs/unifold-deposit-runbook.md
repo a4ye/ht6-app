@@ -7,7 +7,7 @@ values; replace every `<PLACEHOLDER>` locally and never commit them.
 
 ## 1. Local environment (never commit)
 
-Create `crypto/unifold-demo/server/.env` (already gitignored — keep it that way):
+Create `custody/.env` (already gitignored — keep it that way):
 
 ```dotenv
 UNIFOLD_SECRET_KEY=sk_test_<YOUR_TEST_KEY>
@@ -21,17 +21,20 @@ Notes: `CRYPTO_SERVICE_TOKEN` must be ≥ 32 characters or the service refuses t
 boot. If you have no webhook secret yet, `npm run setup:webhook` can provision
 an endpoint, or skip it and rely on polling (step 5).
 
-## 2. Start the custody service and point the main server at it
+## 2. Start the custody service and the main server
+
+From the repo root, one command boots both — the custody service (`:8787`) and
+the main server (`:4000`) — already wired together via `CRYPTO_API_URL` and the
+shared `CRYPTO_SERVICE_TOKEN` read from `custody/.env`:
 
 ```bash
-cd crypto/unifold-demo/server
-npm install
-npm run dev        # (or: npm run build && npm start) — listens on :8787
+npm run install:all   # first time only (root + server + custody deps)
+npm run dev
 ```
 
-On the main server, set `CRYPTO_API_URL=http://localhost:8787` and the exact
-same `CRYPTO_SERVICE_TOKEN` value, then restart it. `GET :8787/health` should
-return `{"ok":true}`.
+`GET :8787/health` should return `{"ok":true}`. (To run only the custody
+service: `npm --prefix custody run dev`; to build + start it for prod:
+`npm --prefix custody run build && npm --prefix custody start`.)
 
 ## 3. Provision the deposit address
 

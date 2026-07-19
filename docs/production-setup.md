@@ -554,7 +554,7 @@ Microsoft documents App Service
 and [log streaming](https://learn.microsoft.com/en-us/azure/app-service/troubleshoot-diagnostic-logs).
 
 The publish-profile secret is required only by the crypto deployment workflow.
-Changes under `crypto/unifold-demo/server/**` also trigger it. Repository variables
+Changes under `custody/**` also trigger it. Repository variables
 are not a safe substitute for this credential.
 
 ### 3. Acceptance checks
