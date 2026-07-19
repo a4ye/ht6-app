@@ -91,6 +91,32 @@ try {
   // column already exists
 }
 
+// --- crypto staking columns/tables (safe on existing DBs) ---
+for (const stmt of [
+  `ALTER TABLE hangouts ADD COLUMN stake_units TEXT`,        // USDC base units, null = no stake
+  `ALTER TABLE hangouts ADD COLUMN crypto_event_id TEXT`,    // Unifold event id
+  `ALTER TABLE hangouts ADD COLUMN settled_at TEXT`,
+]) {
+  try { db.exec(stmt); } catch { /* column exists */ }
+}
+db.exec(`
+CREATE TABLE IF NOT EXISTS hangout_stakes (
+  hangout_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  staked_at TEXT NOT NULL,
+  PRIMARY KEY (hangout_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS hangout_settlements (
+  hangout_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  status TEXT NOT NULL,        -- attended | flaked | refunded
+  payout_units TEXT NOT NULL,
+  PRIMARY KEY (hangout_id, user_id)
+);
+`);
+
+const cryptoApi = require('./crypto');
+
 const ACTIVITIES = [
   { id: 'ramen', label: 'Ramen' },
   { id: 'karaoke', label: 'Karaoke' },
@@ -285,6 +311,32 @@ function hangoutView(h, meId) {
     return [ua.username, ub.username];
   });
   const pairsTotal = (ids.length * (ids.length - 1)) / 2;
+
+  // staking state, entirely from the local DB (no crypto call in list views)
+  let stake = null;
+  if (h.stake_units) {
+    const stakedRows = db.prepare('SELECT user_id FROM hangout_stakes WHERE hangout_id = ?').all(h.id);
+    const stakedIds = new Set(stakedRows.map((r) => r.user_id));
+    const settleRows = db.prepare('SELECT * FROM hangout_settlements WHERE hangout_id = ?').all(h.id);
+    const settleByUser = new Map(settleRows.map((r) => [r.user_id, r]));
+    stake = {
+      stakeUnits: h.stake_units,
+      settled: !!h.settled_at,
+      poolUnits: String(BigInt(h.stake_units) * BigInt(stakedIds.size)),
+      members: ids.map((id) => {
+        const u = db.prepare('SELECT username FROM users WHERE id = ?').get(id);
+        const s = settleByUser.get(id);
+        return {
+          username: u.username,
+          staked: stakedIds.has(id),
+          settleStatus: s ? s.status : null,
+          payoutUnits: s ? s.payout_units : null,
+        };
+      }),
+      iStaked: stakedIds.has(meId),
+    };
+  }
+
   return {
     id: h.id,
     activity: h.activity,
@@ -299,6 +351,7 @@ function hangoutView(h, meId) {
     confirmedPairs,
     pairsTotal,
     mine: ids.includes(meId),
+    stake,
   };
 }
 
@@ -333,6 +386,7 @@ app.post('/auth/register', (req, res) => {
     .run(username, name, birthday, hash(password, salt), salt, token, color || '#A8D8C8',
       SPECIES.includes(species) ? species : 'cat', now());
   const u = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  cryptoApi.ensureUser(username).catch(() => {}); // best-effort wallet + monthly grant
   res.json({ token, me: meView(u) });
 });
 
@@ -341,6 +395,7 @@ app.post('/auth/login', (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE username = ?').get(username || '');
   if (!u || hash(password || '', u.salt) !== u.pass_hash)
     return res.status(401).json({ error: 'Wrong username or password' });
+  cryptoApi.ensureUser(u.username).catch(() => {}); // top up monthly grant on sign-in
   res.json({ token: u.token, me: meView(u) });
 });
 
@@ -575,8 +630,8 @@ app.get('/suggestions', auth, (req, res) => {
 });
 
 // ---------- hangouts ----------
-app.post('/hangouts', auth, (req, res) => {
-  const { activity, date, place, friendUsernames } = req.body || {};
+app.post('/hangouts', auth, async (req, res) => {
+  const { activity, date, place, friendUsernames, stakeUnits } = req.body || {};
   const act = ACTIVITIES.find((a) => a.id === activity);
   if (!act) return res.status(400).json({ error: 'Pick an activity' });
   if (!date || isNaN(new Date(date).getTime()))
@@ -593,14 +648,88 @@ app.post('/hangouts', auth, (req, res) => {
   if (others.length < 1) return res.status(400).json({ error: 'Invite at least one friend' });
   const ids = [req.user.id, ...others.map((u) => u.id)];
   const bonus = bonusFor(date, ids);
+
+  // Optional crypto stake: create the event and stake the host up front, so a
+  // failure (e.g. insufficient balance) aborts before any local hangout exists.
+  let cryptoEventId = null;
+  let stake = null;
+  const wantStake = cryptoApi.enabled() && typeof stakeUnits === 'string' && /^[1-9]\d*$/.test(stakeUnits);
+  if (wantStake) {
+    try {
+      await cryptoApi.ensureUser(req.user.username);
+      for (const u of others) await cryptoApi.ensureUser(u.username).catch(() => {});
+      const bps = Math.min(15000, Math.max(10000, Math.round(bonus.mult * 10000)));
+      const ev = await cryptoApi.createEvent(req.user.username, act.label, stakeUnits, { multiplierBps: bps, startsAt: date });
+      await cryptoApi.rsvp(ev.id, req.user.username); // host stakes now
+      cryptoEventId = ev.id;
+      stake = stakeUnits;
+    } catch (e) {
+      const msg = e instanceof cryptoApi.CryptoError ? e.message : 'Could not set up the stake';
+      return res.status(e && e.status === 400 ? 400 : 502).json({ error: msg });
+    }
+  }
+
   const info = db.prepare(`INSERT INTO hangouts
-    (creator_id, activity, activity_label, date, place, bonus_mult, bonus_reason, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(req.user.id, act.id, act.label, date, place || 'Somewhere', bonus.mult, bonus.reason, now());
+    (creator_id, activity, activity_label, date, place, bonus_mult, bonus_reason, created_at, stake_units, crypto_event_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(req.user.id, act.id, act.label, date, place || 'Somewhere', bonus.mult, bonus.reason, now(), stake, cryptoEventId);
   const hid = info.lastInsertRowid;
   const ins = db.prepare('INSERT INTO hangout_members (hangout_id, user_id) VALUES (?, ?)');
   for (const id of ids) ins.run(hid, id);
+  if (cryptoEventId) {
+    db.prepare('INSERT INTO hangout_stakes (hangout_id, user_id, staked_at) VALUES (?, ?, ?)')
+      .run(hid, req.user.id, now()); // host already staked above
+  }
   res.json({ hangout: hangoutView(db.prepare('SELECT * FROM hangouts WHERE id = ?').get(hid), req.user.id) });
+});
+
+// A member stakes into an existing staked hangout ("put your deposit in").
+app.post('/hangouts/:id/stake', auth, async (req, res) => {
+  const h = db.prepare('SELECT * FROM hangouts WHERE id = ?').get(req.params.id);
+  if (!h || !memberIds(h.id).includes(req.user.id))
+    return res.status(404).json({ error: 'Hangout not found' });
+  if (!h.crypto_event_id) return res.status(400).json({ error: 'This hangout has no stake' });
+  if (h.settled_at) return res.status(400).json({ error: 'Already settled' });
+  const already = db.prepare('SELECT 1 FROM hangout_stakes WHERE hangout_id = ? AND user_id = ?').get(h.id, req.user.id);
+  if (already) return res.status(400).json({ error: 'You already staked' });
+  try {
+    await cryptoApi.rsvp(h.crypto_event_id, req.user.username);
+  } catch (e) {
+    const msg = e instanceof cryptoApi.CryptoError ? e.message : 'Could not stake';
+    return res.status(e && e.status === 400 ? 400 : 502).json({ error: msg });
+  }
+  db.prepare('INSERT INTO hangout_stakes (hangout_id, user_id, staked_at) VALUES (?, ?, ?)')
+    .run(h.id, req.user.id, now());
+  res.json({ hangout: hangoutView(db.prepare('SELECT * FROM hangouts WHERE id = ?').get(h.id), req.user.id) });
+});
+
+// Settle the pool: flakers (staked but never checked in) lose their deposit to
+// the friends who actually showed. Allowed once the hangout has started.
+app.post('/hangouts/:id/settle', auth, async (req, res) => {
+  const h = db.prepare('SELECT * FROM hangouts WHERE id = ?').get(req.params.id);
+  if (!h || !memberIds(h.id).includes(req.user.id))
+    return res.status(404).json({ error: 'Hangout not found' });
+  if (!h.crypto_event_id) return res.status(400).json({ error: 'This hangout has no stake' });
+  if (h.settled_at) return res.status(400).json({ error: 'Already settled' });
+  if (new Date(h.date).getTime() > Date.now())
+    return res.status(400).json({ error: 'Cannot settle before the hangout starts' });
+  let result;
+  try {
+    result = await cryptoApi.settle(h.crypto_event_id);
+  } catch (e) {
+    const msg = e instanceof cryptoApi.CryptoError ? e.message : 'Could not settle';
+    return res.status(502).json({ error: msg });
+  }
+  // Mirror the outcome locally so views need no crypto call.
+  const ins = db.prepare(`INSERT INTO hangout_settlements (hangout_id, user_id, status, payout_units)
+    VALUES (?, ?, ?, ?) ON CONFLICT(hangout_id, user_id) DO UPDATE SET status = excluded.status, payout_units = excluded.payout_units`);
+  for (const r of result.results || []) {
+    const uname = String(r.userId).replace(/^ty_/, '');
+    const u = db.prepare('SELECT id FROM users WHERE username = ?').get(uname);
+    if (u) ins.run(h.id, u.id, r.status, r.payoutUnits);
+  }
+  db.prepare('UPDATE hangouts SET settled_at = ? WHERE id = ?').run(now(), h.id);
+  res.json({ hangout: hangoutView(db.prepare('SELECT * FROM hangouts WHERE id = ?').get(h.id), req.user.id) });
 });
 
 app.get('/hangouts', auth, (req, res) => {
@@ -671,6 +800,13 @@ app.post('/hangouts/:id/confirm', auth, (req, res) => {
       }
     }
     maybeComplete(h.id);
+    // Proof of presence: check in each staker on the crypto event (best-effort).
+    if (h.crypto_event_id) {
+      for (const [uid, uname] of [[req.user.id, req.user.username], [other.id, other.username]]) {
+        const staked = db.prepare('SELECT 1 FROM hangout_stakes WHERE hangout_id = ? AND user_id = ?').get(h.id, uid);
+        if (staked) cryptoApi.checkin(h.crypto_event_id, uname).catch(() => {});
+      }
+    }
   }
   res.json({
     hangout: hangoutView(db.prepare('SELECT * FROM hangouts WHERE id = ?').get(h.id), req.user.id),
@@ -725,6 +861,55 @@ app.post('/shop/buy', auth, (req, res) => {
 app.post('/secret/acorns', auth, (req, res) => {
   db.prepare('UPDATE users SET acorns = acorns + 10 WHERE id = ?').run(req.user.id);
   res.json({ me: meView(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)) });
+});
+
+// ---------- wallet (USDC via Unifold treasury) ----------
+app.get('/wallet', auth, async (req, res) => {
+  if (!cryptoApi.enabled()) return res.json({ enabled: false });
+  try {
+    const w = await cryptoApi.getWallet(req.user.username);
+    res.json({
+      enabled: true,
+      balanceUnits: w.balanceUnits,
+      readyToCashOut: w.readyToCashOut,
+      cashoutThresholdUnits: w.cashoutThresholdUnits,
+      withdrawals: w.withdrawals,
+    });
+  } catch (e) {
+    res.status(502).json({ enabled: true, error: e.message });
+  }
+});
+
+app.post('/wallet/add-funds', auth, async (req, res) => {
+  if (!cryptoApi.enabled()) return res.status(400).json({ error: 'Crypto is off' });
+  try {
+    const r = await cryptoApi.addFunds(req.user.username);
+    res.json(r);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+app.post('/wallet/refresh', auth, async (req, res) => {
+  if (!cryptoApi.enabled()) return res.status(400).json({ error: 'Crypto is off' });
+  try {
+    const r = await cryptoApi.refreshDeposits(req.user.username);
+    res.json(r);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+app.post('/wallet/withdraw', auth, async (req, res) => {
+  if (!cryptoApi.enabled()) return res.status(400).json({ error: 'Crypto is off' });
+  const { amountUnits, destination } = req.body || {};
+  try {
+    const r = await cryptoApi.withdraw(req.user.username, amountUnits, destination);
+    res.json(r);
+  } catch (e) {
+    const status = e instanceof cryptoApi.CryptoError && e.status === 400 ? 400 : 502;
+    res.status(status).json({ error: e.message });
+  }
 });
 
 app.get('/health', (_req, res) => res.json({ ok: true, name: 'tomo-yard' }));
