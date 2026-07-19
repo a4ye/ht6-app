@@ -42,7 +42,9 @@ jobs:
           KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          printf 'SHA=%s\nGH_TOKEN=%s\nKUDU_USER=%s\nKUDU_PASS=%s\nKEYSTORE_B64=%s\nKEYSTORE_PASS=%s\n' \
+          # %q shell-quotes every value: KUDU_USER literally starts with '$'
+          # and would otherwise be expanded away when the VM sources this.
+          printf 'SHA=%q\nGH_TOKEN=%q\nKUDU_USER=%q\nKUDU_PASS=%q\nKEYSTORE_B64=%q\nKEYSTORE_PASS=%q\n' \
             "$GITHUB_SHA" "$GH_TOKEN" "$KUDU_USER" "$KUDU_PASS" "$KEYSTORE_B64" "$KEYSTORE_PASS" \
             | ssh -i builder_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
                 azureuser@${{ secrets.BUILDER_HOST }} \
