@@ -10,6 +10,7 @@
     "build": "tsc --noEmit false --outDir dist",
     "typecheck": "tsc --noEmit",
     "check": "node --env-file-if-exists=.env --import tsx scripts/check.ts",
+    "simulate": "node --import ./scripts/sim-env.mjs --import tsx scripts/simulate-flow.ts",
     "setup:webhook": "node --env-file-if-exists=.env --import tsx scripts/setup-webhook.ts",
     "pretest": "node -e \"require('node:fs').rmSync('.data-test',{recursive:true,force:true})\"",
     "test": "node --import ./test/setup-env.mjs --import tsx --test --test-concurrency=1 \"test/*.test.ts\" \"src/*.test.ts\""
