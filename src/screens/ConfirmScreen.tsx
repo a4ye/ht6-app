@@ -45,9 +45,16 @@ export default function ConfirmScreen({
 }: {
   hangoutId: number; otherUsername: string; otherName: string;
 }) {
-  const { api } = useSession();
+  const { api, me } = useSession();
   const nav = useNav();
   const insets = useSafeAreaInsets();
+
+  // Deterministic role split so the two phones never both show or both scan.
+  // NFC reader mode disables the reader phone's own card emulation, so a tap
+  // only works when exactly one phone shows (HCE) and the other scans (reader).
+  // Both devices compute this with the two usernames swapped, so they always
+  // land on opposite roles; the lower username shows.
+  const iShouldShow = (me?.username ?? '') < otherUsername;
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>('pick');
   const [status, setStatus] = useState<string | null>(null);
@@ -271,8 +278,13 @@ export default function ConfirmScreen({
         {phase === 'pick' && (
           <>
             <Text style={{ fontFamily: F.body, fontSize: 14, color: C.brown, marginTop: 6, textAlign: 'center' }}>
-              Prove you are really together. One of you shows a code, the other scans it.
-              {nfc.enabled ? ' Tapping phones works too.' : ''}
+              Prove you are really together. You two take opposite roles:
+              {nfc.enabled ? ' tap phones, or one shows a code and the other scans.' : ' one shows a code, the other scans it.'}
+            </Text>
+            {/* Each phone recommends the complementary role so you never both do
+                the same thing (which is why a tap would do nothing). */}
+            <Text style={{ fontFamily: F.display, fontSize: 15, color: C.darkInk, marginTop: 10, textAlign: 'center' }}>
+              {iShouldShow ? `You show · ${otherName} scans` : `${otherName} shows · you scan`}
             </Text>
             {nfc.supported && !nfc.enabled && (
               <Text style={{ fontFamily: F.body, fontSize: 13, color: C.redPin, marginTop: 6, textAlign: 'center' }}>
@@ -280,9 +292,19 @@ export default function ConfirmScreen({
               </Text>
             )}
             <View style={{ marginTop: 18, width: '100%' }}>
-              <DoodleButton label="Show my code" seed={5} bg={C.yellow} border={C.brown} onPress={show} />
-              <View style={{ height: 10 }} />
-              <DoodleButton label={`Scan ${otherName}'s code`} seed={6} onPress={scan} />
+              {iShouldShow ? (
+                <>
+                  <DoodleButton label="Show my code" seed={5} bg={C.yellow} border={C.brown} onPress={show} />
+                  <View style={{ height: 10 }} />
+                  <DoodleButton label={`Scan ${otherName}'s instead`} seed={6} onPress={scan} />
+                </>
+              ) : (
+                <>
+                  <DoodleButton label={`Scan ${otherName}'s code`} seed={6} bg={C.yellow} border={C.brown} onPress={scan} />
+                  <View style={{ height: 10 }} />
+                  <DoodleButton label="Show my code instead" seed={5} onPress={show} />
+                </>
+              )}
             </View>
             {status && (
               <Text style={{ fontFamily: F.body, fontSize: 13.5, color: C.redPin, marginTop: 12, textAlign: 'center' }}>
