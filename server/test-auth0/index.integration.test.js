@@ -9,7 +9,6 @@ const { after, before, test } = require('node:test');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tomoyard-auth0-'));
 process.env.DATA_DIR = dataDir;
-process.env.SQLITE_JOURNAL = 'delete';
 process.env.ALLOW_LEGACY_AUTH = 'true';
 process.env.AUTH0_ISSUER_BASE_URL = 'https://test.us.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.tomoyard.invalid';
@@ -60,11 +59,16 @@ require.cache[auth0Path].exports = {
   },
 };
 
-const { app, db } = require('../index');
+const { startTestMongo } = require('../test-helpers/mongo');
+const { app, init, closeDb, store } = require('../index');
+const { nextId } = require('../db');
+let mongod;
 let server;
 let baseUrl;
 
 before(async () => {
+  mongod = await startTestMongo();
+  await init();
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -72,7 +76,8 @@ before(async () => {
 
 after(async () => {
   if (server) await new Promise((resolve) => server.close(resolve));
-  db.close();
+  await closeDb();
+  if (mongod) await mongod.stop();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -92,21 +97,15 @@ async function request(route, { method = 'GET', token, body } = {}) {
   };
 }
 
-test('startup migrates nullable auth0_sub with a unique partial index', () => {
-  const column = db.prepare('PRAGMA table_info(users)').all()
-    .find((entry) => entry.name === 'auth0_sub');
-  assert.ok(column);
-  assert.equal(column.notnull, 0);
-
-  const index = db.prepare('PRAGMA index_list(users)').all()
-    .find((entry) => entry.name === 'users_auth0_sub_unique');
+test('startup creates the unique partial auth0_sub index', async () => {
+  const indexes = await store.users.indexes();
+  const index = indexes.find((entry) => entry.name === 'users_auth0_sub_unique');
   assert.ok(index);
-  assert.equal(index.unique, 1);
-  assert.equal(index.partial, 1);
-  assert.deepEqual(
-    db.prepare('PRAGMA index_info(users_auth0_sub_unique)').all().map((entry) => entry.name),
-    ['auth0_sub'],
-  );
+  assert.equal(index.unique, true);
+  assert.deepEqual(index.key, { auth0_sub: 1 });
+  // Only string subjects participate: legacy rows keep auth0_sub null and are
+  // excluded, exactly like SQLite's `WHERE auth0_sub IS NOT NULL` partial index.
+  assert.deepEqual(Object.keys(index.partialFilterExpression || {}), ['auth0_sub']);
 });
 
 test('legacy registration/login tokens remain compatible only behind the explicit flag', async () => {
@@ -128,9 +127,9 @@ test('legacy registration/login tokens remain compatible only behind the explici
   assert.equal(allowed.status, 200);
   assert.equal(allowed.json.me.username, 'legacy_user');
 
-  // Some pre-interests databases can surface a serialized null-like value.
-  // Treat it as an empty list instead of leaking it or failing the profile read.
-  db.prepare("UPDATE users SET interests = 'null' WHERE username = ?").run('legacy_user');
+  // Some pre-migration rows can surface a serialized null-like value. Treat it
+  // as an empty list instead of leaking it or failing the profile read.
+  await store.users.updateOne({ username: 'legacy_user' }, { $set: { interests: 'null' } });
   const legacyNullInterests = await request('/me', { token: registered.json.token });
   assert.equal(legacyNullInterests.status, 200);
   assert.deepEqual(legacyNullInterests.json.me.interests, []);
@@ -169,11 +168,25 @@ test('legacy registration/login tokens remain compatible only behind the explici
 });
 
 test('JWT-looking credentials always use verification and never database fallback', async () => {
-  db.prepare(`INSERT INTO users
-    (username, name, birthday, pass_hash, salt, token, color, species, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run('jwt_trap', 'JWT Trap', '2000-01-01', 'unused', 'unused',
-      'stored.jwt.token', '#A8D8C8', 'cat', new Date().toISOString());
+  await store.users.insertOne({
+    _id: await nextId('users'),
+    username: 'jwt_trap',
+    name: 'JWT Trap',
+    birthday: '2000-01-01',
+    pass_hash: 'unused',
+    salt: 'unused',
+    token: 'stored.jwt.token',
+    auth0_sub: null,
+    acorns: 50,
+    color: '#A8D8C8',
+    species: 'cat',
+    owned: [],
+    equipped: [],
+    interests: [],
+    pos_x: null,
+    pos_y: null,
+    created_at: new Date().toISOString(),
+  });
 
   const response = await request('/me', { token: 'stored.jwt.token' });
   assert.equal(response.status, 401);
@@ -205,7 +218,7 @@ test('mutable token claims never attach an Auth0 identity to a legacy profile', 
   assert.equal(claimedUsername.status, 409);
   assert.deepEqual(claimedUsername.json, { error: 'Username is taken' });
   assert.equal(
-    db.prepare('SELECT auth0_sub FROM users WHERE username = ?').get('legacy_user').auth0_sub,
+    (await store.users.findOne({ username: 'legacy_user' })).auth0_sub,
     null,
   );
 });
@@ -267,9 +280,9 @@ test('Auth0 profile onboarding is secure, idempotent, and unlocks existing route
   assert.equal(created.json.me.species, body.species);
   assert.deepEqual(created.json.me.interests, sanitizedInterests);
 
-  const row = db.prepare('SELECT * FROM users WHERE username = ?').get(body.username);
+  const row = await store.users.findOne({ username: body.username });
   assert.equal(row.auth0_sub, 'auth0|subject-1');
-  assert.deepEqual(JSON.parse(row.interests), sanitizedInterests);
+  assert.deepEqual(row.interests, sanitizedInterests);
   assert.equal(realAuth0.classifyBearerToken(row.token), 'invalid');
   assert.match(row.token, /^auth0-disabled:/);
   assert.match(row.pass_hash, /^auth0-disabled:/);
@@ -294,15 +307,17 @@ test('Auth0 profile onboarding is secure, idempotent, and unlocks existing route
   assert.equal(protectedRoute.status, 200);
   assert.deepEqual(protectedRoute.json.me, created.json.me);
 
-  const legacyFriend = db.prepare('SELECT * FROM users WHERE username = ?').get('legacy_user');
-  const [aId, bId] = [legacyFriend.id, row.id].sort((a, b) => a - b);
-  db.prepare(`INSERT INTO friendships (a_id, b_id, status, requested_by, created_at)
-    VALUES (?, ?, 'accepted', ?, ?)`).run(
-    aId,
-    bId,
-    legacyFriend.id,
-    new Date().toISOString(),
-  );
+  const legacyFriend = await store.users.findOne({ username: 'legacy_user' });
+  const [aId, bId] = [legacyFriend._id, row._id].sort((a, b) => a - b);
+  await store.friendships.insertOne({
+    _id: await nextId('friendships'),
+    a_id: aId,
+    b_id: bId,
+    status: 'accepted',
+    requested_by: legacyFriend._id,
+    vibe: 0,
+    created_at: new Date().toISOString(),
+  });
   const friendProfile = await request(`/friends/${body.username}`, { token: legacyFriend.token });
   assert.equal(friendProfile.status, 200);
   assert.deepEqual(friendProfile.json.friend.interests, [
@@ -320,10 +335,12 @@ test('Auth0 profile onboarding is secure, idempotent, and unlocks existing route
     'Museum',
   ]);
 
-  assert.throws(
-    () => db.prepare('UPDATE users SET auth0_sub = ? WHERE username = ?')
-      .run('auth0|subject-1', 'legacy_user'),
-    /UNIQUE constraint failed/,
+  await assert.rejects(
+    store.users.updateOne(
+      { username: 'legacy_user' },
+      { $set: { auth0_sub: 'auth0|subject-1' } },
+    ),
+    /E11000/,
   );
 });
 

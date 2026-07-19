@@ -5,16 +5,20 @@ const { backfillAuth0Subjects, MigrationSafetyError } = require('./auth0-legacy-
 
 function usage() {
   return `Usage:
-  node server/scripts/backfill-auth0-subjects.js --db <absolute-sqlite-path> --import-file <absolute-import-json-outside-repo> --dry-run
+  node server/scripts/backfill-auth0-subjects.js [--uri <mongodb-uri>] [--db-name <database>] --import-file <absolute-import-json-outside-repo> --dry-run
 
-  node server/scripts/backfill-auth0-subjects.js --db <absolute-sqlite-path> --import-file <absolute-import-json-outside-repo> --backup <absolute-backup-path-outside-repo> --import-job-id <job_id> --confirmed-success-count 5 --confirm-import-completed
+  node server/scripts/backfill-auth0-subjects.js [--uri <mongodb-uri>] [--db-name <database>] --import-file <absolute-import-json-outside-repo> --backup <absolute-backup-path-outside-repo> --import-job-id <job_id> --confirmed-success-count 5 --confirm-import-completed
 
-  node server/scripts/backfill-auth0-subjects.js --db <absolute-sqlite-path> --import-file <absolute-import-json-outside-repo> --verify
+  node server/scripts/backfill-auth0-subjects.js [--uri <mongodb-uri>] [--db-name <database>] --import-file <absolute-import-json-outside-repo> --verify
 
-Apply mode creates and integrity-checks an online SQLite backup, begins an IMMEDIATE
-transaction, adds auth0_sub/the unique partial index when needed, and links exactly
-the five imported IDs. It refuses to run without an explicitly confirmed completed
-Auth0 import job and exact success count.
+The MongoDB connection defaults to the MONGODB_URI and MONGODB_DB_NAME
+environment variables; --uri/--db-name override them.
+
+Apply mode writes and verifies a private JSON backup of the five target user
+documents, ensures the auth0_sub unique partial index, and links exactly the
+five imported IDs with per-document conditional updates (rolling back on any
+failure). It refuses to run without an explicitly confirmed completed Auth0
+import job and exact success count.
 `;
 }
 
@@ -33,7 +37,8 @@ function parseArguments(argv) {
     ['--confirm-import-completed', 'confirmImportCompleted'],
   ]);
   const valueOptions = new Map([
-    ['--db', 'dbPath'],
+    ['--uri', 'uri'],
+    ['--db-name', 'dbName'],
     ['--import-file', 'importPath'],
     ['--backup', 'backupPath'],
     ['--import-job-id', 'importJobId'],
@@ -59,7 +64,7 @@ function parseArguments(argv) {
     index += 1;
   }
 
-  if (!options.dbPath || !options.importPath) throw new Error('--db and --import-file are required');
+  if (!options.importPath) throw new Error('--import-file is required');
   if (!options.dryRun && !options.verify) {
     for (const [property, option] of [
       ['backupPath', '--backup'],

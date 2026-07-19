@@ -9,7 +9,6 @@ const { after, before, test } = require('node:test');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tomoyard-end-hangout-'));
 process.env.DATA_DIR = dataDir;
-process.env.SQLITE_JOURNAL = 'delete';
 process.env.ALLOW_LEGACY_AUTH = 'true';
 process.env.AUTH0_ISSUER_BASE_URL = 'https://test.us.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.tomoyard.invalid';
@@ -112,7 +111,10 @@ require.cache[cryptoPath] = {
   exports: fakeCrypto,
 };
 
-const { app, db } = require('../index');
+const { startTestMongo } = require('../test-helpers/mongo');
+const { app, init, closeDb, store } = require('../index');
+const { nextId } = require('../db');
+let mongod;
 let server;
 let baseUrl;
 const auth = new Map();
@@ -148,8 +150,8 @@ async function register(username) {
   auth.set(username, result.json.token);
 }
 
-function userId(username) {
-  return db.prepare('SELECT id FROM users WHERE username = ?').get(username).id;
+async function userId(username) {
+  return (await store.users.findOne({ username }))._id;
 }
 
 function settlementResult(eventId, stakeUnits, entries, forfeitPoolUnits) {
@@ -166,7 +168,7 @@ function settlementResult(eventId, stakeUnits, entries, forfeitPoolUnits) {
   };
 }
 
-function makeHangout({
+async function makeHangout({
   members = ['alice', 'bob'],
   date = new Date(Date.now() - 60_000).toISOString(),
   photo = 'proof.jpg',
@@ -179,25 +181,32 @@ function makeHangout({
   eventStatus = 'open',
   settleBehaviors = [],
 } = {}) {
-  const creatorId = userId(members[0]);
-  const photoById = photoBy == null ? null : userId(photoBy);
-  const info = db.prepare(`INSERT INTO hangouts
-    (creator_id, activity, activity_label, date, place, photo, photo_by,
-      completed_at, created_at, stake_units, crypto_event_id)
-    VALUES (?, 'ramen', 'Ramen', ?, 'Test cafe', ?, ?, ?, ?, ?, ?)`)
-    .run(
-      creatorId,
-      date,
-      photo,
-      photoById,
-      completedAt,
-      new Date().toISOString(),
-      stakeUnits,
-      eventId,
-    );
-  const hangoutId = Number(info.lastInsertRowid);
-  const insertMember = db.prepare('INSERT INTO hangout_members (hangout_id, user_id) VALUES (?, ?)');
-  for (const username of members) insertMember.run(hangoutId, userId(username));
+  const memberIds = [];
+  for (const username of members) memberIds.push(await userId(username));
+  const photoById = photoBy == null ? null : await userId(photoBy);
+  const hangoutId = await nextId('hangouts');
+  await store.hangouts.insertOne({
+    _id: hangoutId,
+    creator_id: memberIds[0],
+    activity: 'ramen',
+    activity_label: 'Ramen',
+    date,
+    place: 'Test cafe',
+    bonus_mult: 1,
+    bonus_reason: null,
+    photo,
+    photo_by: photoById,
+    completed_at: completedAt,
+    created_at: new Date().toISOString(),
+    stake_units: stakeUnits,
+    crypto_event_id: eventId,
+    settled_at: null,
+    member_ids: memberIds,
+    confirms: [],
+    stakes: [],
+    settlements: [],
+    nfc_tokens: [],
+  });
 
   if (eventId) {
     state.events.set(eventId, {
@@ -217,17 +226,26 @@ function makeHangout({
   return hangoutId;
 }
 
-function timestamps(hangoutId) {
-  return db.prepare('SELECT settled_at, completed_at FROM hangouts WHERE id = ?').get(hangoutId);
+async function timestamps(hangoutId) {
+  const h = await store.hangouts.findOne(
+    { _id: hangoutId },
+    { projection: { settled_at: 1, completed_at: 1 } },
+  );
+  return { settled_at: h.settled_at, completed_at: h.completed_at };
 }
 
-function settlementRows(hangoutId) {
-  return db.prepare(`SELECT u.username, hs.status, hs.payout_units
-    FROM hangout_settlements hs JOIN users u ON u.id = hs.user_id
-    WHERE hs.hangout_id = ? ORDER BY u.username`).all(hangoutId);
+async function settlementRows(hangoutId) {
+  const h = await store.hangouts.findOne({ _id: hangoutId });
+  const users = await store.users.find({ _id: { $in: h.settlements.map((s) => s.user_id) } }).toArray();
+  const usernameById = new Map(users.map((u) => [u._id, u.username]));
+  return h.settlements
+    .map((s) => ({ username: usernameById.get(s.user_id), status: s.status, payout_units: s.payout_units }))
+    .sort((a, b) => (a.username < b.username ? -1 : a.username > b.username ? 1 : 0));
 }
 
 before(async () => {
+  mongod = await startTestMongo();
+  await init();
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -236,13 +254,14 @@ before(async () => {
 
 after(async () => {
   if (server) await new Promise((resolve) => server.close(resolve));
-  db.close();
+  await closeDb();
+  if (mongod) await mongod.stop();
   fs.rmSync(dataDir, { recursive: true, force: true });
   delete require.cache[cryptoPath];
 });
 
 test('end requires authentication, membership, start time, and a photo', async () => {
-  const futureId = makeHangout({ date: new Date(Date.now() + 60_000).toISOString() });
+  const futureId = await makeHangout({ date: new Date(Date.now() + 60_000).toISOString() });
   assert.equal((await request(`/hangouts/${futureId}/end`, { method: 'POST' })).status, 401);
   assert.equal((await request(`/hangouts/${futureId}/end`, {
     method: 'POST', token: auth.get('erin'),
@@ -252,18 +271,18 @@ test('end requires authentication, membership, start time, and a photo', async (
     method: 'POST', token: auth.get('alice'),
   });
   assert.equal(tooEarly.status, 400);
-  assert.equal(timestamps(futureId).completed_at, null);
+  assert.equal((await timestamps(futureId)).completed_at, null);
 
-  const noPhotoId = makeHangout({ photo: null, photoBy: null });
+  const noPhotoId = await makeHangout({ photo: null, photoBy: null });
   const noPhoto = await request(`/hangouts/${noPhotoId}/end`, {
     method: 'POST', token: auth.get('alice'),
   });
   assert.equal(noPhoto.status, 400);
-  assert.equal(timestamps(noPhotoId).completed_at, null);
+  assert.equal((await timestamps(noPhotoId)).completed_at, null);
 });
 
 test('non-staked end is successful and already-ended retries are idempotent', async () => {
-  const hangoutId = makeHangout();
+  const hangoutId = await makeHangout();
   const ended = await request(`/hangouts/${hangoutId}/end`, {
     method: 'POST', token: auth.get('bob'),
   });
@@ -276,7 +295,7 @@ test('non-staked end is successful and already-ended retries are idempotent', as
   });
   assert.equal(retried.status, 200);
   assert.equal(retried.json.hangout.completedAt, firstCompletedAt);
-  assert.equal(timestamps(hangoutId).settled_at, null);
+  assert.equal((await timestamps(hangoutId)).settled_at, null);
 });
 
 test('attendance combines photo_by with both confirmation sides and check-ins are awaited', async () => {
@@ -287,14 +306,21 @@ test('attendance combines photo_by with both confirmation sides and check-ins ar
     ['carol', 'attended', '400'],
     ['dave', 'flaked', '0'],
   ], '300');
-  const hangoutId = makeHangout({
+  const hangoutId = await makeHangout({
     members: ['alice', 'bob', 'carol', 'dave'],
     stakeUnits: '300',
     eventId,
     result,
   });
-  db.prepare('INSERT INTO confirms (hangout_id, u1, u2, confirmed_at) VALUES (?, ?, ?, ?)')
-    .run(hangoutId, userId('bob'), userId('carol'), new Date().toISOString());
+  await store.hangouts.updateOne({ _id: hangoutId }, {
+    $push: {
+      confirms: {
+        u1: await userId('bob'),
+        u2: await userId('carol'),
+        confirmed_at: new Date().toISOString(),
+      },
+    },
+  });
 
   const gate = deferred();
   state.checkinGates.set(`${eventId}:bob`, gate);
@@ -308,7 +334,7 @@ test('attendance combines photo_by with both confirmation sides and check-ins ar
   await gate.entered;
   assert.equal(requestFinished, false);
   assert.deepEqual(state.settleCalls.filter((id) => id === eventId), []);
-  assert.equal(timestamps(hangoutId).completed_at, null);
+  assert.equal((await timestamps(hangoutId)).completed_at, null);
   gate.resolve();
 
   const ended = await ending;
@@ -317,14 +343,14 @@ test('attendance combines photo_by with both confirmation sides and check-ins ar
     state.checkinCalls.filter((call) => call.eventId === eventId).map((call) => call.username),
     ['alice', 'bob', 'carol'],
   );
-  assert.deepEqual(settlementRows(hangoutId), [
+  assert.deepEqual(await settlementRows(hangoutId), [
     { username: 'alice', status: 'attended', payout_units: '400' },
     { username: 'bob', status: 'attended', payout_units: '400' },
     { username: 'carol', status: 'attended', payout_units: '400' },
     { username: 'dave', status: 'flaked', payout_units: '0' },
   ]);
-  assert.ok(timestamps(hangoutId).settled_at);
-  assert.ok(timestamps(hangoutId).completed_at);
+  assert.ok((await timestamps(hangoutId)).settled_at);
+  assert.ok((await timestamps(hangoutId)).completed_at);
 });
 
 test('check-in and invalid remote settlement failures publish no completion state', async () => {
@@ -333,7 +359,7 @@ test('check-in and invalid remote settlement failures publish no completion stat
     ['alice', 'attended', '200'],
     ['bob', 'flaked', '0'],
   ], '100');
-  const checkinHangoutId = makeHangout({
+  const checkinHangoutId = await makeHangout({
     stakeUnits: '100', eventId: checkinEventId, result: checkinResult,
   });
   state.checkinErrors.set(
@@ -346,11 +372,11 @@ test('check-in and invalid remote settlement failures publish no completion stat
   });
   assert.equal(checkinFailure.status, 502);
   assert.deepEqual(state.settleCalls.filter((id) => id === checkinEventId), []);
-  assert.deepEqual(timestamps(checkinHangoutId), { settled_at: null, completed_at: null });
-  assert.deepEqual(settlementRows(checkinHangoutId), []);
+  assert.deepEqual(await timestamps(checkinHangoutId), { settled_at: null, completed_at: null });
+  assert.deepEqual(await settlementRows(checkinHangoutId), []);
 
   const invalidEventId = 'end-invalid-settlement';
-  const hangoutId = makeHangout({
+  const hangoutId = await makeHangout({
     stakeUnits: '100',
     eventId: invalidEventId,
     result: settlementResult('wrong-event', '100', [
@@ -358,58 +384,67 @@ test('check-in and invalid remote settlement failures publish no completion stat
       ['bob', 'flaked', '0'],
     ], '100'),
   });
-  db.prepare(`INSERT INTO hangout_settlements (hangout_id, user_id, status, payout_units)
-    VALUES (?, ?, 'refunded', '77')`).run(hangoutId, userId('bob'));
+  await store.hangouts.updateOne({ _id: hangoutId }, {
+    $push: { settlements: { user_id: await userId('bob'), status: 'refunded', payout_units: '77' } },
+  });
 
   const invalid = await request(`/hangouts/${hangoutId}/end`, {
     method: 'POST', token: auth.get('alice'),
   });
   assert.equal(invalid.status, 502);
-  assert.deepEqual(timestamps(hangoutId), { settled_at: null, completed_at: null });
-  assert.deepEqual(settlementRows(hangoutId), [
+  assert.deepEqual(await timestamps(hangoutId), { settled_at: null, completed_at: null });
+  assert.deepEqual(await settlementRows(hangoutId), [
     { username: 'bob', status: 'refunded', payout_units: '77' },
   ]);
 });
 
-test('local mirror failure rolls back atomically and reconciles a remote-settled retry', async () => {
+test('local mirror failure publishes nothing and reconciles a remote-settled retry', async () => {
   const eventId = 'end-local-failure';
   const result = settlementResult(eventId, '100', [
     ['alice', 'attended', '200'],
     ['bob', 'flaked', '0'],
   ], '100');
-  const hangoutId = makeHangout({ stakeUnits: '100', eventId, result });
-  db.prepare(`INSERT INTO hangout_settlements (hangout_id, user_id, status, payout_units)
-    VALUES (?, ?, 'refunded', '91')`).run(hangoutId, userId('bob'));
-  const trigger = `fail_end_mirror_${hangoutId}`;
-  db.exec(`CREATE TRIGGER ${trigger} BEFORE INSERT ON hangout_settlements
-    WHEN NEW.hangout_id = ${hangoutId}
-    BEGIN SELECT RAISE(ABORT, 'forced local mirror failure'); END`);
+  const hangoutId = await makeHangout({ stakeUnits: '100', eventId, result });
+  await store.hangouts.updateOne({ _id: hangoutId }, {
+    $push: { settlements: { user_id: await userId('bob'), status: 'refunded', payout_units: '91' } },
+  });
+  // The settlement publish is a single aggregation-pipeline update; forcing it
+  // to fail is the Mongo equivalent of the old SQLite BEFORE INSERT trigger.
+  // Settlement + timestamps live in one document, so a failed publish changes
+  // nothing at all.
+  const failPublish = async (filter, update, options) => {
+    if (Array.isArray(update) && filter._id === hangoutId) {
+      throw new Error('forced local mirror failure');
+    }
+    return store.hangouts.constructor.prototype.updateOne.call(store.hangouts, filter, update, options);
+  };
+  store.hangouts.updateOne = failPublish;
 
   const failed = await request(`/hangouts/${hangoutId}/end`, {
     method: 'POST', token: auth.get('alice'),
   });
   assert.equal(failed.status, 502);
-  assert.deepEqual(timestamps(hangoutId), { settled_at: null, completed_at: null });
-  assert.deepEqual(settlementRows(hangoutId), [
+  assert.deepEqual(await timestamps(hangoutId), { settled_at: null, completed_at: null });
+  assert.deepEqual(await settlementRows(hangoutId), [
     { username: 'bob', status: 'refunded', payout_units: '91' },
   ]);
   assert.equal(state.events.get(eventId).status, 'settled');
   const checkinsBeforeRetry = state.checkinCalls.filter((call) => call.eventId === eventId).length;
 
-  db.exec(`DROP TRIGGER ${trigger}`);
+  delete store.hangouts.updateOne; // restore the real prototype method
   const reconciled = await request(`/hangouts/${hangoutId}/end`, {
     method: 'POST', token: auth.get('bob'),
   });
   assert.equal(reconciled.status, 200);
   assert.equal(reconciled.json.hangout.stake.settled, true);
-  assert.ok(timestamps(hangoutId).settled_at);
-  assert.ok(timestamps(hangoutId).completed_at);
+  assert.ok((await timestamps(hangoutId)).settled_at);
+  assert.ok((await timestamps(hangoutId)).completed_at);
   assert.equal(
     state.checkinCalls.filter((call) => call.eventId === eventId).length,
     checkinsBeforeRetry,
     'a settled remote event must not receive another check-in',
   );
-  assert.deepEqual(settlementRows(hangoutId), [
+  assert.deepEqual(await settlementRows(hangoutId), [
     { username: 'alice', status: 'attended', payout_units: '200' },
     { username: 'bob', status: 'flaked', payout_units: '0' },
   ]);
@@ -435,7 +470,7 @@ test('a lost settlement response is safe to reconcile on retry', async () => {
     event.status = 'settled';
     throw new CryptoError(502, 'Settlement response was lost', 'crypto_upstream_failed');
   };
-  const hangoutId = makeHangout({
+  const hangoutId = await makeHangout({
     stakeUnits: '100', eventId, result, settleBehaviors: [loseFirstResponse],
   });
 
@@ -443,8 +478,8 @@ test('a lost settlement response is safe to reconcile on retry', async () => {
     method: 'POST', token: auth.get('alice'),
   });
   assert.equal(lost.status, 502);
-  assert.deepEqual(timestamps(hangoutId), { settled_at: null, completed_at: null });
-  assert.deepEqual(settlementRows(hangoutId), []);
+  assert.deepEqual(await timestamps(hangoutId), { settled_at: null, completed_at: null });
+  assert.deepEqual(await settlementRows(hangoutId), []);
   const firstCheckins = state.checkinCalls.filter((call) => call.eventId === eventId).length;
 
   const retry = await request(`/hangouts/${hangoutId}/end`, {
@@ -456,7 +491,7 @@ test('a lost settlement response is safe to reconcile on retry', async () => {
     state.checkinCalls.filter((call) => call.eventId === eventId).length,
     firstCheckins,
   );
-  assert.deepEqual(settlementRows(hangoutId), [
+  assert.deepEqual(await settlementRows(hangoutId), [
     { username: 'alice', status: 'attended', payout_units: '200' },
     { username: 'bob', status: 'flaked', payout_units: '0' },
   ]);

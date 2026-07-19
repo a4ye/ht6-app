@@ -1,12 +1,12 @@
 // Tomo Together server: accounts, friends, hangouts, vibe, wardrobe, leaderboard.
 const express = require('express');
-const Database = require('better-sqlite3');
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { WebSocketServer } = require('ws');
+const { closeDb, connectDb, isDuplicateKeyError, nextId, store, withId } = require('./db');
 const {
   AuthConfigurationError,
   bindAuth0Subject,
@@ -20,133 +20,13 @@ const {
 const PORT = process.env.PORT || 4000;
 // DATA_DIR is overridable so hosted deploys can keep state outside the app dir
 // (on Azure App Service, /home/data survives redeploys while wwwroot does not).
+// It now only holds uploads, the APK, and the exported web bundle; durable
+// application data lives in MongoDB (MONGODB_URI / MONGODB_DB_NAME).
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const db = new Database(path.join(DATA_DIR, 'tomoyard.sqlite'));
-// WAL needs shared memory and cannot work on network mounts (App Service /home);
-// set SQLITE_JOURNAL=delete there.
-db.pragma(`journal_mode = ${process.env.SQLITE_JOURNAL || 'WAL'}`);
-
-db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE NOT NULL,
-  name TEXT NOT NULL,
-  birthday TEXT NOT NULL,         -- YYYY-MM-DD
-  pass_hash TEXT NOT NULL,
-  salt TEXT NOT NULL,
-  token TEXT UNIQUE NOT NULL,
-  auth0_sub TEXT,
-  acorns INTEGER NOT NULL DEFAULT 50,
-  color TEXT NOT NULL DEFAULT '#A8D8C8',
-  owned TEXT NOT NULL DEFAULT '[]',     -- JSON array of item ids
-  equipped TEXT NOT NULL DEFAULT '[]',  -- JSON array of item ids
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS weights (
-  user_id INTEGER NOT NULL,
-  activity TEXT NOT NULL,
-  weight REAL NOT NULL DEFAULT 50,
-  PRIMARY KEY (user_id, activity)
-);
-CREATE TABLE IF NOT EXISTS friendships (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  a_id INTEGER NOT NULL,          -- a_id < b_id
-  b_id INTEGER NOT NULL,
-  status TEXT NOT NULL,           -- pending | accepted
-  requested_by INTEGER NOT NULL,
-  vibe INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  UNIQUE (a_id, b_id)
-);
-CREATE TABLE IF NOT EXISTS hangouts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  creator_id INTEGER NOT NULL,
-  activity TEXT NOT NULL,
-  activity_label TEXT NOT NULL,
-  date TEXT NOT NULL,             -- ISO datetime
-  place TEXT NOT NULL,
-  bonus_mult REAL NOT NULL DEFAULT 1,
-  bonus_reason TEXT,
-  photo TEXT,
-  completed_at TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS hangout_members (
-  hangout_id INTEGER NOT NULL,
-  user_id INTEGER NOT NULL,
-  PRIMARY KEY (hangout_id, user_id)
-);
-CREATE TABLE IF NOT EXISTS confirms (
-  hangout_id INTEGER NOT NULL,
-  u1 INTEGER NOT NULL,            -- u1 < u2
-  u2 INTEGER NOT NULL,
-  confirmed_at TEXT NOT NULL,
-  PRIMARY KEY (hangout_id, u1, u2)
-);
-CREATE TABLE IF NOT EXISTS nfc_tokens (
-  hangout_id INTEGER NOT NULL,
-  user_id INTEGER NOT NULL,
-  token TEXT NOT NULL,
-  expires_at INTEGER NOT NULL,
-  PRIMARY KEY (hangout_id, user_id)
-);
-`);
-
 const SPECIES = ['cat', 'bear', 'bunny', 'frog', 'duck'];
-// existing databases get the new column on startup
-try {
-  db.exec(`ALTER TABLE users ADD COLUMN species TEXT NOT NULL DEFAULT 'cat'`);
-} catch {
-  // column already exists
-}
-try {
-  db.exec(`ALTER TABLE users ADD COLUMN auth0_sub TEXT`);
-} catch {
-  // column already exists
-}
-// Auth0 identities are linked exclusively by the provider's stable `sub`.
-// Legacy rows intentionally remain null and therefore do not participate.
-db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_auth0_sub_unique
-  ON users(auth0_sub) WHERE auth0_sub IS NOT NULL`);
-
-// --- walkable world position (safe on existing DBs) ---
-for (const stmt of [
-  `ALTER TABLE users ADD COLUMN pos_x REAL`,
-  `ALTER TABLE users ADD COLUMN pos_y REAL`,
-]) {
-  try { db.exec(stmt); } catch { /* column exists */ }
-}
-
-// --- crypto staking columns/tables (safe on existing DBs) ---
-for (const stmt of [
-  `ALTER TABLE hangouts ADD COLUMN stake_units TEXT`,        // USDC base units, null = no stake
-  `ALTER TABLE hangouts ADD COLUMN crypto_event_id TEXT`,    // Unifold event id
-  `ALTER TABLE hangouts ADD COLUMN settled_at TEXT`,
-  `ALTER TABLE hangouts ADD COLUMN photo_by INTEGER`,        // who took the photo = proof they showed
-  `ALTER TABLE users ADD COLUMN interests TEXT NOT NULL DEFAULT '[]'`, // JSON array of activity ids
-]) {
-  try { db.exec(stmt); } catch { /* column exists */ }
-}
-// small key/value store for one-time migrations
-db.exec(`CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT)`);
-db.exec(`
-CREATE TABLE IF NOT EXISTS hangout_stakes (
-  hangout_id INTEGER NOT NULL,
-  user_id INTEGER NOT NULL,
-  staked_at TEXT NOT NULL,
-  PRIMARY KEY (hangout_id, user_id)
-);
-CREATE TABLE IF NOT EXISTS hangout_settlements (
-  hangout_id INTEGER NOT NULL,
-  user_id INTEGER NOT NULL,
-  status TEXT NOT NULL,        -- attended | flaked | refunded
-  payout_units TEXT NOT NULL,
-  PRIMARY KEY (hangout_id, user_id)
-);
-`);
 
 const cryptoApi = require('./crypto');
 
@@ -255,34 +135,59 @@ function sanitizeInterests(arr) {
 function interestsOf(u) {
   return sanitizeInterests(safeJsonArray(u && u.interests));
 }
-function interestSetOf(userId) {
-  const u = db.prepare('SELECT interests FROM users WHERE id = ?').get(userId);
+async function interestSetOf(userId) {
+  const u = await store.users.findOne({ _id: userId }, { projection: { interests: 1 } });
   return new Set(u ? interestsOf(u) : []);
+}
+
+// Bodies and query strings are attacker-controlled; anything that ends up in a
+// MongoDB filter must be a plain string so `{ $gt: '' }`-style operator objects
+// can never reach a query.
+function asString(value) {
+  return typeof value === 'string' ? value : '';
+}
+
+// Route ids are the hangouts' integer ids from the old schema.
+function parseId(value) {
+  return /^\d+$/.test(String(value)) ? Number(value) : null;
 }
 
 // One-time: give accounts that predate this feature a starter set of interests
 // drawn from the activities they've already upvoted (falling back to popular
 // picks), so their profiles and suggestions aren't blank. Guarded by app_meta so
 // a user who later clears their interests on purpose stays cleared.
-function seedInterestsForExistingUsers() {
-  if (db.prepare('SELECT 1 FROM app_meta WHERE key = ?').get('interests_seeded')) return;
+async function seedInterestsForExistingUsers() {
+  if (await store.appMeta.findOne({ _id: 'interests_seeded' })) return;
   const DEFAULTS = ['ramen', 'boba', 'film', 'boardgames', 'karaoke'];
-  const users = db.prepare("SELECT id FROM users WHERE interests IS NULL OR interests = '[]'").all();
-  const set = db.prepare('UPDATE users SET interests = ? WHERE id = ?');
-  const seedOne = db.transaction(() => {
-    for (const u of users) {
-      const liked = db.prepare(
-        'SELECT activity FROM weights WHERE user_id = ? AND weight > 52 ORDER BY weight DESC LIMIT 6'
-      ).all(u.id).map((r) => r.activity).filter((a) => ACTIVITY_IDS.has(a));
-      const picks = [...liked];
-      for (const d of DEFAULTS) { if (picks.length >= 3) break; if (!picks.includes(d)) picks.push(d); }
-      set.run(JSON.stringify(picks), u.id);
-    }
-    db.prepare('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)').run('interests_seeded', '1');
-  });
-  seedOne();
+  const users = await store.users
+    .find({ $or: [{ interests: null }, { interests: 'null' }, { interests: '[]' }, { interests: { $size: 0 } }] },
+      { projection: { _id: 1 } })
+    .toArray();
+  for (const u of users) {
+    const liked = (await store.weights
+      .find({ user_id: u._id, weight: { $gt: 52 } })
+      .sort({ weight: -1 })
+      .limit(6)
+      .toArray())
+      .map((r) => r.activity)
+      .filter((a) => ACTIVITY_IDS.has(a));
+    const picks = [...liked];
+    for (const d of DEFAULTS) { if (picks.length >= 3) break; if (!picks.includes(d)) picks.push(d); }
+    await store.users.updateOne({ _id: u._id }, { $set: { interests: picks } });
+  }
+  await store.appMeta.updateOne({ _id: 'interests_seeded' }, { $set: { value: '1' } }, { upsert: true });
 }
-seedInterestsForExistingUsers();
+
+let initPromise = null;
+// Connect to MongoDB, create indexes, and run startup seeding exactly once.
+function init() {
+  initPromise ??= (async () => {
+    await connectDb();
+    await seedInterestsForExistingUsers();
+    return store;
+  })();
+  return initPromise;
+}
 
 const ITEMS = [
   { id: 'party_hat', name: 'Party Hat', price: 60 },
@@ -333,6 +238,11 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json());
+// Every request waits for the one-time MongoDB initialization. After the first
+// resolution this is a resolved-promise await and effectively free.
+app.use((req, res, next) => {
+  init().then(() => next(), next);
+});
 app.use('/uploads', express.static(UPLOAD_DIR));
 // react-native-web clone of the app: CI exports the same src/ to static files and
 // drops them in DATA_DIR/webapp; we serve them for the ht6-app.* host only.
@@ -381,6 +291,17 @@ const newToken = () => crypto.randomBytes(24).toString('hex');
 const pair = (x, y) => (x < y ? [x, y] : [y, x]);
 const level = (vibe) => Math.floor(vibe / VIBE_PER_LEVEL) + 1;
 
+async function getUser(id) {
+  return withId(await store.users.findOne({ _id: id }));
+}
+async function getUserByUsername(username) {
+  return withId(await store.users.findOne({ username: asString(username) }));
+}
+async function getHangout(id) {
+  if (id == null) return null;
+  return withId(await store.hangouts.findOne({ _id: id }));
+}
+
 let auth0JwtMiddleware = null;
 let auth0ConfigurationError = null;
 try {
@@ -428,10 +349,11 @@ function auth0Identity(req, res, next) {
 }
 
 function requireAuth0Profile(req, res, next) {
-  const user = db.prepare('SELECT * FROM users WHERE auth0_sub = ?').get(req.auth0Sub);
-  if (!user) return res.status(409).json({ error: 'PROFILE_REQUIRED' });
-  req.user = user;
-  next();
+  store.users.findOne({ auth0_sub: req.auth0Sub }).then((user) => {
+    if (!user) return res.status(409).json({ error: 'PROFILE_REQUIRED' });
+    req.user = withId(user);
+    next();
+  }, next);
 }
 
 function auth(req, res, next) {
@@ -440,10 +362,13 @@ function auth(req, res, next) {
 
   if (kind === 'legacy') {
     if (!isLegacyTokenAllowed(token)) return notSignedIn(res);
-    const user = db.prepare('SELECT * FROM users WHERE token = ? AND auth0_sub IS NULL').get(token);
-    if (!user) return notSignedIn(res);
-    req.user = user;
-    return next();
+    // `auth0_sub: null` matches both stored-null and absent, mirroring IS NULL.
+    store.users.findOne({ token, auth0_sub: null }).then((user) => {
+      if (!user) return notSignedIn(res);
+      req.user = withId(user);
+      next();
+    }, next);
+    return;
   }
 
   if (kind === 'jwt') {
@@ -456,28 +381,23 @@ function auth(req, res, next) {
   return notSignedIn(res);
 }
 
-function bonusFor(dateISO, memberIds) {
+async function bonusFor(dateISO, memberIds) {
   const d = new Date(dateISO);
   const hol = HOLIDAYS.find((h) => h.month === d.getMonth() + 1 && h.day === d.getDate());
   if (hol) return { mult: 2, reason: hol.label };
   const mmdd = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  for (const id of memberIds) {
-    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-    if (u && u.birthday.slice(5) === mmdd) {
+  const members = await store.users.find({ _id: { $in: memberIds } }).toArray();
+  for (const u of members) {
+    if (u.birthday.slice(5) === mmdd) {
       return { mult: 2, reason: `${u.name}'s birthday` };
     }
   }
   return { mult: 1, reason: null };
 }
 
-function friendship(meId, otherId) {
+async function friendship(meId, otherId) {
   const [a, b] = pair(meId, otherId);
-  return db.prepare('SELECT * FROM friendships WHERE a_id = ? AND b_id = ?').get(a, b);
-}
-
-function memberIds(hangoutId) {
-  return db.prepare('SELECT user_id FROM hangout_members WHERE hangout_id = ?')
-    .all(hangoutId).map((r) => r.user_id);
+  return withId(await store.friendships.findOne({ a_id: a, b_id: b }));
 }
 
 // A short status/title for a friendship, from vibe + streak + staleness.
@@ -497,14 +417,21 @@ function friendTitle({ vibeLevel, streak, lastHangoutAt, friendsSince }) {
 }
 
 // Completed hangouts both users attended: last one + count over the past 30 days.
-function hangoutStats(meId, otherId) {
+async function hangoutStats(meId, otherId) {
   const cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-  const r = db.prepare(`SELECT MAX(h.completed_at) last, SUM(h.completed_at > ?) recent
-    FROM hangouts h
-    JOIN hangout_members m1 ON m1.hangout_id = h.id AND m1.user_id = ?
-    JOIN hangout_members m2 ON m2.hangout_id = h.id AND m2.user_id = ?
-    WHERE h.completed_at IS NOT NULL`).get(cutoff, meId, otherId);
-  return { lastHangoutAt: r.last, recentHangouts: r.recent || 0, streak: (r.recent || 0) >= 3 };
+  const rows = await store.hangouts
+    .find(
+      { member_ids: { $all: [meId, otherId] }, completed_at: { $ne: null } },
+      { projection: { completed_at: 1 } },
+    )
+    .toArray();
+  let last = null;
+  let recent = 0;
+  for (const r of rows) {
+    if (last === null || r.completed_at > last) last = r.completed_at;
+    if (r.completed_at > cutoff) recent += 1;
+  }
+  return { lastHangoutAt: last, recentHangouts: recent, streak: recent >= 3 };
 }
 
 // Next Friday 18:00 local, strictly in the future (today 18:00 if Friday before 18:00).
@@ -516,54 +443,37 @@ function nextFriday18(from = new Date()) {
   return d;
 }
 
-function allPairs(ids) {
-  const out = [];
-  for (let i = 0; i < ids.length; i++)
-    for (let j = i + 1; j < ids.length; j++) out.push(pair(ids[i], ids[j]));
-  return out;
-}
-
 // Who actually showed up: the photo taker (present to snap it) plus anyone who
 // confirmed (tapped) with someone. Everyone else is a no-show.
-function attendeeIdSet(h, ids) {
+function attendeeIdSet(h) {
   const set = new Set();
   if (h.photo_by != null) set.add(h.photo_by);
-  const confirms = db.prepare('SELECT u1, u2 FROM confirms WHERE hangout_id = ?').all(h.id);
-  for (const c of confirms) { set.add(c.u1); set.add(c.u2); }
+  for (const c of h.confirms || []) { set.add(c.u1); set.add(c.u2); }
   return set;
 }
 
-function hangoutView(h, meId) {
-  const ids = memberIds(h.id);
-  const attendees = attendeeIdSet(h, ids);
-  const members = ids.map((id) => {
-    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-    return { ...publicUser(u), attended: attendees.has(id) };
-  });
-  const confirms = db.prepare('SELECT * FROM confirms WHERE hangout_id = ?').all(h.id);
-  const confirmedPairs = confirms.map((c) => {
-    const ua = db.prepare('SELECT username FROM users WHERE id = ?').get(c.u1);
-    const ub = db.prepare('SELECT username FROM users WHERE id = ?').get(c.u2);
-    return [ua.username, ub.username];
-  });
+async function hangoutView(h, meId) {
+  const ids = h.member_ids;
+  const memberDocs = await store.users.find({ _id: { $in: ids } }).toArray();
+  const byId = new Map(memberDocs.map((u) => [u._id, u]));
+  const attendees = attendeeIdSet(h);
+  const members = ids.map((id) => ({ ...publicUser(byId.get(id)), attended: attendees.has(id) }));
+  const confirmedPairs = (h.confirms || []).map((c) => [byId.get(c.u1).username, byId.get(c.u2).username]);
   const pairsTotal = (ids.length * (ids.length - 1)) / 2;
 
   // staking state, entirely from the local DB (no crypto call in list views)
   let stake = null;
   if (h.stake_units) {
-    const stakedRows = db.prepare('SELECT user_id FROM hangout_stakes WHERE hangout_id = ?').all(h.id);
-    const stakedIds = new Set(stakedRows.map((r) => r.user_id));
-    const settleRows = db.prepare('SELECT * FROM hangout_settlements WHERE hangout_id = ?').all(h.id);
-    const settleByUser = new Map(settleRows.map((r) => [r.user_id, r]));
+    const stakedIds = new Set((h.stakes || []).map((s) => s.user_id));
+    const settleByUser = new Map((h.settlements || []).map((s) => [s.user_id, s]));
     stake = {
       stakeUnits: h.stake_units,
       settled: !!h.settled_at,
       poolUnits: String(BigInt(h.stake_units) * BigInt(stakedIds.size)),
       members: ids.map((id) => {
-        const u = db.prepare('SELECT username FROM users WHERE id = ?').get(id);
         const s = settleByUser.get(id);
         return {
-          username: u.username,
+          username: byId.get(id).username,
           staked: stakedIds.has(id),
           settleStatus: s ? s.status : null,
           payoutUnits: s ? s.payout_units : null,
@@ -574,7 +484,7 @@ function hangoutView(h, meId) {
   }
 
   return {
-    id: h.id,
+    id: h._id,
     activity: h.activity,
     activityLabel: h.activity_label,
     date: h.date,
@@ -593,17 +503,16 @@ function hangoutView(h, meId) {
   };
 }
 
-function maybeComplete(hangoutId) {
-  const h = db.prepare('SELECT * FROM hangouts WHERE id = ?').get(hangoutId);
+async function maybeComplete(hangoutId) {
+  const h = await store.hangouts.findOne({ _id: hangoutId });
   if (!h || h.completed_at) return;
-  const ids = memberIds(hangoutId);
-  const need = (ids.length * (ids.length - 1)) / 2;
-  const got = db.prepare('SELECT COUNT(*) c FROM confirms WHERE hangout_id = ?').get(hangoutId).c;
+  const need = (h.member_ids.length * (h.member_ids.length - 1)) / 2;
+  const got = (h.confirms || []).length;
   // A staked hangout is completed by /end only after the remote payout has
   // been reconciled and mirrored locally. Non-staked hangouts can retain the
   // original automatic all-pairs completion behavior.
   if (h.photo && got >= need && !h.crypto_event_id) {
-    db.prepare('UPDATE hangouts SET completed_at = ? WHERE id = ?').run(now(), hangoutId);
+    await store.hangouts.updateOne({ _id: hangoutId, completed_at: null }, { $set: { completed_at: now() } });
   }
 }
 
@@ -617,15 +526,15 @@ function isValidBirthday(value) {
     parsed.getUTCDate() === day;
 }
 
-app.get('/auth/profile', auth0Identity, (req, res) => {
-  const user = db.prepare('SELECT * FROM users WHERE auth0_sub = ?').get(req.auth0Sub);
+app.get('/auth/profile', auth0Identity, asyncRoute(async (req, res) => {
+  const user = await store.users.findOne({ auth0_sub: req.auth0Sub });
   res.json({ me: user ? meView(user) : null });
-});
+}));
 
-const provisionAuth0Profile = db.transaction((profile) => {
-  const existing = db.prepare('SELECT * FROM users WHERE auth0_sub = ?').get(profile.auth0Sub);
-  if (existing) return { created: false, user: existing };
-  if (db.prepare('SELECT id FROM users WHERE username = ?').get(profile.username)) {
+async function provisionAuth0Profile(profile) {
+  const existing = await store.users.findOne({ auth0_sub: profile.auth0Sub });
+  if (existing) return { created: false, user: withId(existing) };
+  if (await store.users.findOne({ username: profile.username })) {
     return { conflict: true };
   }
 
@@ -635,31 +544,42 @@ const provisionAuth0Profile = db.transaction((profile) => {
   const disabledPasswordHash = `auth0-disabled:${crypto.randomBytes(32).toString('hex')}`;
   const disabledSalt = `auth0-disabled:${crypto.randomBytes(16).toString('hex')}`;
   const disabledToken = `auth0-disabled:${crypto.randomBytes(32).toString('hex')}`;
-  db.prepare(`INSERT INTO users
-    (username, name, birthday, pass_hash, salt, token, auth0_sub, color, species, interests, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    profile.username,
-    profile.name,
-    profile.birthday,
-    disabledPasswordHash,
-    disabledSalt,
-    disabledToken,
-    profile.auth0Sub,
-    profile.color,
-    profile.species,
-    JSON.stringify(profile.interests),
-    now(),
-  );
-  return {
-    created: true,
-    user: db.prepare('SELECT * FROM users WHERE auth0_sub = ?').get(profile.auth0Sub),
+  const doc = {
+    _id: await nextId('users'),
+    username: profile.username,
+    name: profile.name,
+    birthday: profile.birthday,
+    pass_hash: disabledPasswordHash,
+    salt: disabledSalt,
+    token: disabledToken,
+    auth0_sub: profile.auth0Sub,
+    acorns: 50,
+    color: profile.color,
+    species: profile.species,
+    owned: [],
+    equipped: [],
+    interests: profile.interests,
+    pos_x: null,
+    pos_y: null,
+    created_at: now(),
   };
-});
+  try {
+    // The unique indexes on username and auth0_sub serialize provisioning
+    // across server processes, replacing SQLite's IMMEDIATE transaction.
+    await store.users.insertOne(doc);
+  } catch (error) {
+    if (!isDuplicateKeyError(error)) throw error;
+    const raced = await store.users.findOne({ auth0_sub: profile.auth0Sub });
+    if (raced) return { created: false, user: withId(raced) };
+    return { conflict: true };
+  }
+  return { created: true, user: withId(doc) };
+}
 
-app.put('/auth/profile', auth0Identity, (req, res, next) => {
+app.put('/auth/profile', auth0Identity, asyncRoute(async (req, res) => {
   // Retried onboarding requests return the already-linked row unchanged. In
   // particular, request claims or a later username cannot relink an identity.
-  const existing = db.prepare('SELECT * FROM users WHERE auth0_sub = ?').get(req.auth0Sub);
+  const existing = await store.users.findOne({ auth0_sub: req.auth0Sub });
   if (existing) return res.status(200).json({ me: meView(existing) });
 
   const { username, name, birthday, color, species, interests } = req.body || {};
@@ -679,33 +599,23 @@ app.put('/auth/profile', auth0Identity, (req, res, next) => {
   if (!SPECIES.includes(species)) {
     return res.status(400).json({ error: 'Species is not supported' });
   }
-  let result;
-  try {
-    // IMMEDIATE serializes provisioning across server processes before either
-    // the subject or username uniqueness checks are made.
-    result = provisionAuth0Profile.immediate({
-      auth0Sub: req.auth0Sub,
-      username,
-      name,
-      birthday,
-      color,
-      species,
-      interests: sanitizeInterests(interests),
-    });
-  } catch (error) {
-    if (error && String(error.code || '').startsWith('SQLITE_CONSTRAINT')) {
-      return res.status(409).json({ error: 'Username is taken' });
-    }
-    return next(error);
-  }
+  const result = await provisionAuth0Profile({
+    auth0Sub: req.auth0Sub,
+    username,
+    name,
+    birthday,
+    color,
+    species,
+    interests: sanitizeInterests(interests),
+  });
   if (result.conflict) return res.status(409).json({ error: 'Username is taken' });
   if (!result.created) return res.status(200).json({ me: meView(result.user) });
 
   cryptoApi.ensureUser(result.user.username).catch(() => {}); // best-effort wallet registration
   return res.status(201).json({ me: meView(result.user) });
-});
+}));
 
-app.post('/auth/register', requireLegacyAuthEnabled, (req, res) => {
+app.post('/auth/register', requireLegacyAuthEnabled, asyncRoute(async (req, res) => {
   const { username, name, birthday, password, color, species, interests } = req.body || {};
   if (!/^[a-z0-9_]{3,20}$/.test(username || ''))
     return res.status(400).json({ error: 'Username must be 3-20 chars: a-z, 0-9, _' });
@@ -715,27 +625,47 @@ app.post('/auth/register', requireLegacyAuthEnabled, (req, res) => {
     return res.status(400).json({ error: 'Birthday must be a valid date' });
   if (!password || password.length < 6)
     return res.status(400).json({ error: 'Password must be at least 6 characters' });
-  if (db.prepare('SELECT id FROM users WHERE username = ?').get(username))
+  if (await store.users.findOne({ username }))
     return res.status(409).json({ error: 'Username is taken' });
   const salt = crypto.randomBytes(8).toString('hex');
   const token = newToken();
-  db.prepare(`INSERT INTO users (username, name, birthday, pass_hash, salt, token, color, species, interests, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(username, name, birthday, hash(password, salt), salt, token, color || '#A8D8C8',
-      SPECIES.includes(species) ? species : 'cat', JSON.stringify(sanitizeInterests(interests)), now());
-  const u = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  const doc = {
+    _id: await nextId('users'),
+    username,
+    name,
+    birthday,
+    pass_hash: hash(password, salt),
+    salt,
+    token,
+    auth0_sub: null,
+    acorns: 50,
+    color: color || '#A8D8C8',
+    species: SPECIES.includes(species) ? species : 'cat',
+    owned: [],
+    equipped: [],
+    interests: sanitizeInterests(interests),
+    pos_x: null,
+    pos_y: null,
+    created_at: now(),
+  };
+  try {
+    await store.users.insertOne(doc);
+  } catch (error) {
+    if (isDuplicateKeyError(error)) return res.status(409).json({ error: 'Username is taken' });
+    throw error;
+  }
   cryptoApi.ensureUser(username).catch(() => {}); // best-effort wallet registration
-  res.json({ token, me: meView(u) });
-});
+  res.json({ token, me: meView(doc) });
+}));
 
-app.post('/auth/login', requireLegacyAuthEnabled, (req, res) => {
+app.post('/auth/login', requireLegacyAuthEnabled, asyncRoute(async (req, res) => {
   const { username, password } = req.body || {};
-  const u = db.prepare('SELECT * FROM users WHERE username = ?').get(username || '');
-  if (!u || u.auth0_sub || hash(password || '', u.salt) !== u.pass_hash)
+  const u = await store.users.findOne({ username: asString(username) });
+  if (!u || u.auth0_sub || hash(asString(password), u.salt) !== u.pass_hash)
     return res.status(401).json({ error: 'Wrong username or password' });
   cryptoApi.ensureUser(u.username).catch(() => {}); // best-effort wallet registration
   res.json({ token: u.token, me: meView(u) });
-});
+}));
 
 function meView(u) {
   return {
@@ -753,45 +683,58 @@ function meView(u) {
 
 app.get('/me', auth, (req, res) => res.json({ me: meView(req.user) }));
 
-app.put('/me/interests', auth, (req, res) => {
+app.put('/me/interests', auth, asyncRoute(async (req, res) => {
   const interests = sanitizeInterests(req.body?.interests);
-  db.prepare('UPDATE users SET interests = ? WHERE id = ?').run(JSON.stringify(interests), req.user.id);
-  res.json({ me: meView(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)) });
-});
+  await store.users.updateOne({ _id: req.user.id }, { $set: { interests } });
+  res.json({ me: meView(await getUser(req.user.id)) });
+}));
 
-app.put('/me/avatar', auth, (req, res) => {
+app.put('/me/avatar', auth, asyncRoute(async (req, res) => {
   const { color, equipped, species } = req.body || {};
-  const owned = JSON.parse(req.user.owned);
+  const owned = safeJsonArray(req.user.owned);
   const eq = Array.isArray(equipped) ? equipped.filter((i) => owned.includes(i)) : [];
-  db.prepare('UPDATE users SET color = ?, equipped = ?, species = ? WHERE id = ?')
-    .run(color || req.user.color, JSON.stringify(eq),
-      SPECIES.includes(species) ? species : req.user.species, req.user.id);
-  res.json({ me: meView(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)) });
-});
+  await store.users.updateOne({ _id: req.user.id }, {
+    $set: {
+      color: typeof color === 'string' && color ? color : req.user.color,
+      equipped: eq,
+      species: SPECIES.includes(species) ? species : req.user.species,
+    },
+  });
+  res.json({ me: meView(await getUser(req.user.id)) });
+}));
 
 // ---------- catalog ----------
 app.get('/catalog', (_req, res) => res.json({ activities: ACTIVITIES, items: ITEMS, holidays: HOLIDAYS }));
 
 // ---------- users and friends ----------
-app.get('/users/search', auth, (req, res) => {
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+app.get('/users/search', auth, asyncRoute(async (req, res) => {
   const q = String(req.query.q || '').toLowerCase().trim();
   if (q.length < 2) return res.json({ users: [] });
-  const rows = db.prepare(
-    `SELECT * FROM users WHERE (username LIKE ? OR lower(name) LIKE ?) AND id != ? LIMIT 6`
-  ).all(`${q}%`, `%${q}%`, req.user.id);
+  const escaped = escapeRegex(q);
+  const rows = await store.users
+    .find({
+      _id: { $ne: req.user.id },
+      $or: [
+        { username: { $regex: `^${escaped}` } },
+        { name: { $regex: escaped, $options: 'i' } },
+      ],
+    })
+    .limit(6)
+    .toArray();
   res.json({ users: rows.map(publicUser) });
-});
+}));
 
-app.get('/friends', auth, (req, res) => {
+app.get('/friends', auth, asyncRoute(async (req, res) => {
   const me = req.user.id;
-  const rows = db.prepare(
-    'SELECT * FROM friendships WHERE (a_id = ? OR b_id = ?)').all(me, me);
+  const rows = await store.friendships.find({ $or: [{ a_id: me }, { b_id: me }] }).toArray();
   const friends = [];
   const incoming = [];
   const outgoing = [];
   for (const f of rows) {
     const otherId = f.a_id === me ? f.b_id : f.a_id;
-    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(otherId);
+    const u = await getUser(otherId);
     const view = {
       ...publicUser(u),
       birthday: u.birthday.slice(5),
@@ -801,7 +744,7 @@ app.get('/friends', auth, (req, res) => {
       vibePerLevel: VIBE_PER_LEVEL,
     };
     if (f.status === 'accepted') {
-      const stats = hangoutStats(me, otherId);
+      const stats = await hangoutStats(me, otherId);
       const title = friendTitle({
         vibeLevel: view.vibeLevel, streak: stats.streak,
         lastHangoutAt: stats.lastHangoutAt, friendsSince: f.created_at,
@@ -812,23 +755,21 @@ app.get('/friends', auth, (req, res) => {
   }
   friends.sort((x, y) => y.vibe - x.vibe);
   res.json({ friends, incoming, outgoing });
-});
+}));
 
 // Detailed profile for one accepted friend, including your shared history.
-app.get('/friends/:username', auth, (req, res) => {
+app.get('/friends/:username', auth, asyncRoute(async (req, res) => {
   const me = req.user.id;
-  const other = db.prepare('SELECT * FROM users WHERE username = ?').get(req.params.username);
+  const other = await getUserByUsername(req.params.username);
   if (!other) return res.status(404).json({ error: 'No such user' });
-  const f = friendship(me, other.id);
+  const f = await friendship(me, other.id);
   if (!f || f.status !== 'accepted') return res.status(403).json({ error: 'Not your friend' });
 
   // hangouts you two both attended
-  const shared = db.prepare(
-    `SELECT h.* FROM hangouts h
-     JOIN hangout_members m1 ON m1.hangout_id = h.id AND m1.user_id = ?
-     JOIN hangout_members m2 ON m2.hangout_id = h.id AND m2.user_id = ?
-     ORDER BY h.date DESC`
-  ).all(me, other.id);
+  const shared = await store.hangouts
+    .find({ member_ids: { $all: [me, other.id] } })
+    .sort({ date: -1 })
+    .toArray();
   const completed = shared.filter((h) => h.completed_at);
   const upcoming = shared.filter((h) => !h.completed_at && new Date(h.date).getTime() >= Date.now());
 
@@ -838,6 +779,7 @@ app.get('/friends/:username', auth, (req, res) => {
   const topActivities = Object.entries(counts)
     .sort((a, b) => b[1] - a[1]).slice(0, 3).map(([label]) => label);
 
+  const stats = await hangoutStats(me, other.id);
   res.json({
     friend: {
       ...publicUser(other),
@@ -852,141 +794,161 @@ app.get('/friends/:username', auth, (req, res) => {
       upcomingCount: upcoming.length,
       topActivities,
       interests: interestsOf(other).map(labelOf).filter(Boolean),
-      recentMemories: completed.slice(0, 4).map((h) => hangoutView(h, me)),
+      recentMemories: await Promise.all(completed.slice(0, 4).map((h) => hangoutView(h, me))),
       ...friendTitle({
         vibeLevel: level(f.vibe),
-        streak: hangoutStats(me, other.id).streak,
+        streak: stats.streak,
         lastHangoutAt: completed[0] ? completed[0].completed_at : null,
         friendsSince: f.created_at,
       }),
     },
   });
-});
+}));
 
-app.post('/friends/request', auth, (req, res) => {
-  const other = db.prepare('SELECT * FROM users WHERE username = ?').get(req.body?.username || '');
+app.post('/friends/request', auth, asyncRoute(async (req, res) => {
+  const other = await getUserByUsername(req.body?.username);
   if (!other) return res.status(404).json({ error: 'No such username' });
   if (other.id === req.user.id) return res.status(400).json({ error: 'That is you' });
-  const existing = friendship(req.user.id, other.id);
+  const existing = await friendship(req.user.id, other.id);
   if (existing) {
     if (existing.status === 'accepted') return res.status(409).json({ error: 'Already friends' });
     if (existing.requested_by === req.user.id)
       return res.status(409).json({ error: 'Request already sent' });
     // they already asked us: accept
-    db.prepare('UPDATE friendships SET status = ? WHERE id = ?').run('accepted', existing.id);
+    await store.friendships.updateOne({ _id: existing.id }, { $set: { status: 'accepted' } });
     return res.json({ ok: true, accepted: true });
   }
   const [a, b] = pair(req.user.id, other.id);
-  db.prepare(`INSERT INTO friendships (a_id, b_id, status, requested_by, created_at)
-              VALUES (?, ?, 'pending', ?, ?)`).run(a, b, req.user.id, now());
+  await store.friendships.insertOne({
+    _id: await nextId('friendships'),
+    a_id: a,
+    b_id: b,
+    status: 'pending',
+    requested_by: req.user.id,
+    vibe: 0,
+    created_at: now(),
+  });
   res.json({ ok: true, accepted: false });
-});
+}));
 
-app.post('/friends/accept', auth, (req, res) => {
-  const other = db.prepare('SELECT * FROM users WHERE username = ?').get(req.body?.username || '');
+app.post('/friends/accept', auth, asyncRoute(async (req, res) => {
+  const other = await getUserByUsername(req.body?.username);
   if (!other) return res.status(404).json({ error: 'No such username' });
-  const f = friendship(req.user.id, other.id);
+  const f = await friendship(req.user.id, other.id);
   if (!f || f.status !== 'pending' || f.requested_by === req.user.id)
     return res.status(400).json({ error: 'No pending request from them' });
-  db.prepare('UPDATE friendships SET status = ? WHERE id = ?').run('accepted', f.id);
+  await store.friendships.updateOne({ _id: f.id }, { $set: { status: 'accepted' } });
   res.json({ ok: true });
-});
+}));
 
 // Friend card: profile + vibe + tastes for the tap-on-friend detail view.
-app.get('/friends/:username/card', auth, (req, res) => {
-  const u = db.prepare('SELECT * FROM users WHERE username = ?').get(req.params.username);
-  const f = u && friendship(req.user.id, u.id);
+app.get('/friends/:username/card', auth, asyncRoute(async (req, res) => {
+  const u = await getUserByUsername(req.params.username);
+  const f = u && await friendship(req.user.id, u.id);
   if (!f || f.status !== 'accepted') return res.status(404).json({ error: 'Not your friend' });
   const labels = (rows) => rows
     .map((r) => ACTIVITIES.find((a) => a.id === r.activity))
     .filter(Boolean).slice(0, 3).map((a) => a.label);
-  const likes = labels(db.prepare(
-    'SELECT activity FROM weights WHERE user_id = ? AND weight > 52 ORDER BY weight DESC').all(u.id));
-  const dislikes = labels(db.prepare(
-    'SELECT activity FROM weights WHERE user_id = ? AND weight < 48 ORDER BY weight ASC').all(u.id));
+  const likes = labels(await store.weights
+    .find({ user_id: u.id, weight: { $gt: 52 } }).sort({ weight: -1 }).toArray());
+  const dislikes = labels(await store.weights
+    .find({ user_id: u.id, weight: { $lt: 48 } }).sort({ weight: 1 }).toArray());
   res.json({
     card: {
       ...publicUser(u),
       birthday: u.birthday.slice(5),
       vibeLevel: level(f.vibe),
-      lastHangoutAt: hangoutStats(req.user.id, u.id).lastHangoutAt,
+      lastHangoutAt: (await hangoutStats(req.user.id, u.id)).lastHangoutAt,
       likes,
       dislikes,
     },
   });
-});
+}));
 
 // ---------- activity weights and duels ----------
-function weightOf(userId, activity) {
-  const r = db.prepare('SELECT weight FROM weights WHERE user_id = ? AND activity = ?')
-    .get(userId, activity);
-  return r ? r.weight : 50;
+async function weightMapFor(userIds) {
+  const rows = await store.weights.find({ user_id: { $in: userIds } }).toArray();
+  return new Map(rows.map((r) => [`${r.user_id}:${r.activity}`, r.weight]));
 }
 
 // The score used to order activities for a person: their learned duel weight,
 // lifted if it's one of their stated interests. This is what makes interests
 // steer which hangouts get suggested.
-function rankScore(userId, activity, interestSet) {
-  const base = weightOf(userId, activity);
+function rankScore(weights, userId, activity, interestSet) {
+  const stored = weights.get(`${userId}:${activity}`);
+  const base = stored === undefined ? 50 : stored;
   return interestSet && interestSet.has(activity) ? Math.min(100, base + INTEREST_BOOST) : base;
 }
 
-app.get('/activities/ranked', auth, (req, res) => {
+app.get('/activities/ranked', auth, asyncRoute(async (req, res) => {
   const usernames = String(req.query.with || '').split(',').filter(Boolean);
   const ids = [req.user.id];
   for (const un of usernames) {
-    const u = db.prepare('SELECT id FROM users WHERE username = ?').get(un);
-    if (u) ids.push(u.id);
+    const u = await store.users.findOne({ username: un }, { projection: { _id: 1 } });
+    if (u) ids.push(u._id);
   }
-  const sets = new Map(ids.map((id) => [id, interestSetOf(id)]));
+  const sets = new Map();
+  for (const id of ids) sets.set(id, await interestSetOf(id));
+  const weights = await weightMapFor(ids);
   const ranked = ACTIVITIES.map((a) => ({
     ...a,
-    combined: ids.reduce((s, id) => s + rankScore(id, a.id, sets.get(id)), 0) / ids.length,
+    combined: ids.reduce((s, id) => s + rankScore(weights, id, a.id, sets.get(id)), 0) / ids.length,
   })).sort((x, y) => y.combined - x.combined);
   res.json({ activities: ranked });
-});
+}));
 
-app.post('/duels', auth, (req, res) => {
+app.post('/duels', auth, asyncRoute(async (req, res) => {
   const { winner, loser } = req.body || {};
   if (!ACTIVITIES.some((a) => a.id === winner) || !ACTIVITIES.some((a) => a.id === loser))
     return res.status(400).json({ error: 'Unknown activity' });
-  const w = weightOf(req.user.id, winner);
-  const l = weightOf(req.user.id, loser);
+  const weights = await weightMapFor([req.user.id]);
+  const w = rankScore(weights, req.user.id, winner, null);
+  const l = rankScore(weights, req.user.id, loser, null);
   const expected = 1 / (1 + Math.pow(10, (l - w) / 40));
   const dw = Math.max(1, Math.round(8 * (1 - expected)));
-  const up = db.prepare(`INSERT INTO weights (user_id, activity, weight) VALUES (?, ?, ?)
-    ON CONFLICT(user_id, activity) DO UPDATE SET weight = ?`);
-  up.run(req.user.id, winner, Math.min(100, w + dw), Math.min(100, w + dw));
-  up.run(req.user.id, loser, Math.max(0, l - dw / 2), Math.max(0, l - dw / 2));
+  await store.weights.updateOne(
+    { user_id: req.user.id, activity: winner },
+    { $set: { weight: Math.min(100, w + dw) } },
+    { upsert: true },
+  );
+  await store.weights.updateOne(
+    { user_id: req.user.id, activity: loser },
+    { $set: { weight: Math.max(0, l - dw / 2) } },
+    { upsert: true },
+  );
   res.json({ ok: true });
-});
+}));
 
 // ---------- suggestions ----------
 // One concrete plan: most-neglected friend + the pair's best activity, next Friday 18:00.
-app.get('/suggestions', auth, (req, res) => {
+app.get('/suggestions', auth, asyncRoute(async (req, res) => {
   const me = req.user.id;
-  const fr = db.prepare(
-    `SELECT * FROM friendships WHERE (a_id = ? OR b_id = ?) AND status = 'accepted'`).all(me, me);
+  const fr = await store.friendships
+    .find({ $or: [{ a_id: me }, { b_id: me }], status: 'accepted' })
+    .toArray();
   let best = null;
   for (const f of fr) {
     const otherId = f.a_id === me ? f.b_id : f.a_id;
     // don't re-suggest a pair that already has a hangout in the works
-    const open = db.prepare(`SELECT COUNT(*) AS c FROM hangouts h
-      JOIN hangout_members m1 ON m1.hangout_id = h.id AND m1.user_id = ?
-      JOIN hangout_members m2 ON m2.hangout_id = h.id AND m2.user_id = ?
-      WHERE h.completed_at IS NULL`).get(me, otherId).c;
+    const open = await store.hangouts.countDocuments({
+      member_ids: { $all: [me, otherId] },
+      completed_at: null,
+    });
     if (open > 0) continue;
-    const { lastHangoutAt } = hangoutStats(me, otherId);
+    const { lastHangoutAt } = await hangoutStats(me, otherId);
     const t = lastHangoutAt ? new Date(lastHangoutAt).getTime() : -Infinity;
     if (!best || t < best.t || (t === best.t && f.vibe > best.vibe))
       best = { otherId, t, vibe: f.vibe, lastHangoutAt };
   }
   if (!best) return res.json({ suggestion: null });
-  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(best.otherId);
-  const meSet = interestSetOf(me);
-  const uSet = interestSetOf(u.id);
-  const top = ACTIVITIES.map((a) => ({ ...a, combined: rankScore(me, a.id, meSet) + rankScore(u.id, a.id, uSet) }))
-    .sort((x, y) => y.combined - x.combined)[0];
+  const u = await getUser(best.otherId);
+  const meSet = await interestSetOf(me);
+  const uSet = await interestSetOf(u.id);
+  const weights = await weightMapFor([me, u.id]);
+  const top = ACTIVITIES.map((a) => ({
+    ...a,
+    combined: rankScore(weights, me, a.id, meSet) + rankScore(weights, u.id, a.id, uSet),
+  })).sort((x, y) => y.combined - x.combined)[0];
   const stale = !best.lastHangoutAt || best.t < Date.now() - 14 * 24 * 3600 * 1000;
   res.json({
     suggestion: {
@@ -996,7 +958,7 @@ app.get('/suggestions', auth, (req, res) => {
       reason: stale ? 'stale' : 'vibe',
     },
   });
-});
+}));
 
 // ---------- hangouts ----------
 app.post('/hangouts', auth, asyncRoute(async (req, res) => {
@@ -1007,16 +969,16 @@ app.post('/hangouts', auth, asyncRoute(async (req, res) => {
     return res.status(400).json({ error: 'Pick a date' });
   const others = [];
   for (const un of friendUsernames || []) {
-    const u = db.prepare('SELECT * FROM users WHERE username = ?').get(un);
+    const u = await getUserByUsername(un);
     if (!u) return res.status(404).json({ error: `No such user: ${un}` });
-    const f = friendship(req.user.id, u.id);
+    const f = await friendship(req.user.id, u.id);
     if (!f || f.status !== 'accepted')
       return res.status(400).json({ error: `${u.name} is not your friend yet` });
     others.push(u);
   }
   if (others.length < 1) return res.status(400).json({ error: 'Invite at least one friend' });
   const ids = [req.user.id, ...others.map((u) => u.id)];
-  const bonus = bonusFor(date, ids);
+  const bonus = await bonusFor(date, ids);
 
   // A requested stake is never silently downgraded. Create the remote event,
   // but let the host use the same explicit, retryable Stake action as everyone
@@ -1048,30 +1010,42 @@ app.post('/hangouts', auth, asyncRoute(async (req, res) => {
     }
   }
 
-  const insertHangout = db.transaction(() => {
-    const info = db.prepare(`INSERT INTO hangouts
-      (creator_id, activity, activity_label, date, place, bonus_mult, bonus_reason, created_at, stake_units, crypto_event_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(req.user.id, act.id, act.label, date, place || 'Somewhere', bonus.mult, bonus.reason, now(), stake, cryptoEventId);
-    const hid = info.lastInsertRowid;
-    const ins = db.prepare('INSERT INTO hangout_members (hangout_id, user_id) VALUES (?, ?)');
-    for (const id of ids) ins.run(hid, id);
-    return hid;
+  const hid = await nextId('hangouts');
+  await store.hangouts.insertOne({
+    _id: hid,
+    creator_id: req.user.id,
+    activity: act.id,
+    activity_label: act.label,
+    date,
+    place: place || 'Somewhere',
+    bonus_mult: bonus.mult,
+    bonus_reason: bonus.reason,
+    photo: null,
+    photo_by: null,
+    completed_at: null,
+    created_at: now(),
+    stake_units: stake,
+    crypto_event_id: cryptoEventId,
+    settled_at: null,
+    member_ids: ids,
+    confirms: [],
+    stakes: [],
+    settlements: [],
+    nfc_tokens: [],
   });
-  const hid = insertHangout();
-  res.json({ hangout: hangoutView(db.prepare('SELECT * FROM hangouts WHERE id = ?').get(hid), req.user.id) });
+  res.json({ hangout: await hangoutView(await getHangout(hid), req.user.id) });
 }));
 
 // A member stakes into an existing staked hangout ("put your deposit in").
 app.post('/hangouts/:id/stake', auth, asyncRoute(async (req, res) => {
-  const h = db.prepare('SELECT * FROM hangouts WHERE id = ?').get(req.params.id);
-  if (!h || !memberIds(h.id).includes(req.user.id))
+  const h = await getHangout(parseId(req.params.id));
+  if (!h || !h.member_ids.includes(req.user.id))
     return res.status(404).json({ error: 'Hangout not found' });
   if (!h.crypto_event_id) return res.status(400).json({ error: 'This hangout has no stake' });
   if (h.settled_at) return res.status(409).json({ error: 'crypto_conflict', message: 'Already settled' });
-  const already = db.prepare('SELECT 1 FROM hangout_stakes WHERE hangout_id = ? AND user_id = ?').get(h.id, req.user.id);
+  const already = (h.stakes || []).some((s) => s.user_id === req.user.id);
   if (already) {
-    return res.json({ hangout: hangoutView(h, req.user.id) });
+    return res.json({ hangout: await hangoutView(h, req.user.id) });
   }
   try {
     await cryptoApi.ensureUser(req.user.username);
@@ -1099,10 +1073,11 @@ app.post('/hangouts/:id/stake', auth, asyncRoute(async (req, res) => {
   } catch (e) {
     return sendCryptoError(res, e);
   }
-  db.prepare(`INSERT INTO hangout_stakes (hangout_id, user_id, staked_at) VALUES (?, ?, ?)
-    ON CONFLICT(hangout_id, user_id) DO NOTHING`)
-    .run(h.id, req.user.id, now());
-  res.json({ hangout: hangoutView(db.prepare('SELECT * FROM hangouts WHERE id = ?').get(h.id), req.user.id) });
+  await store.hangouts.updateOne(
+    { _id: h.id, 'stakes.user_id': { $ne: req.user.id } },
+    { $push: { stakes: { user_id: req.user.id, staked_at: now() } } },
+  );
+  res.json({ hangout: await hangoutView(await getHangout(h.id), req.user.id) });
 }));
 
 function invalidCryptoUpstream(message = 'Crypto service returned an invalid settlement.') {
@@ -1113,24 +1088,27 @@ function validCryptoInteger(value) {
   return typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value) && value.length <= 34;
 }
 
-function finishHangoutLocally(hangoutId) {
-  db.prepare('UPDATE hangouts SET completed_at = COALESCE(completed_at, ?) WHERE id = ?')
-    .run(now(), hangoutId);
+async function finishHangoutLocally(hangoutId) {
+  await store.hangouts.updateOne(
+    { _id: hangoutId, completed_at: null },
+    { $set: { completed_at: now() } },
+  );
 }
 
 // Reconcile the authoritative RSVP set, replay all local attendance proof, and
 // validate the full payout before publishing it to local views. When `complete`
-// is true, settlement and completion become visible in the same transaction.
+// is true, settlement and completion become visible in the same atomic
+// single-document update.
 async function settleStakeAndMirror(h, attendeeIds, { complete = false } = {}) {
-  const current = db.prepare('SELECT * FROM hangouts WHERE id = ?').get(h.id);
+  const current = await getHangout(h.id ?? h._id);
   if (!current) throw invalidCryptoUpstream('Hangout disappeared during settlement.');
   if (!current.crypto_event_id) {
-    if (complete) finishHangoutLocally(current.id);
-    return db.prepare('SELECT * FROM hangouts WHERE id = ?').get(current.id);
+    if (complete) await finishHangoutLocally(current.id);
+    return getHangout(current.id);
   }
   if (current.settled_at) {
-    if (complete) finishHangoutLocally(current.id);
-    return db.prepare('SELECT * FROM hangouts WHERE id = ?').get(current.id);
+    if (complete) await finishHangoutLocally(current.id);
+    return getHangout(current.id);
   }
 
   // Only known members with this hangout's exact stake may enter the local
@@ -1151,10 +1129,9 @@ async function settleStakeAndMirror(h, attendeeIds, { complete = false } = {}) {
   if (remoteEvent.multiplierBps != null && remoteEvent.multiplierBps !== expectedMultiplierBps) {
     throw invalidCryptoUpstream('Crypto event multiplier does not match this hangout.');
   }
-  const members = new Map(memberIds(current.id).map((id) => {
-    const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(id);
-    return user ? [cryptoApi.extId(user.username), user] : [null, null];
-  }).filter(([externalId]) => externalId));
+  const memberDocs = await store.users.find({ _id: { $in: current.member_ids } }).toArray();
+  const usersById = new Map(memberDocs.map((u) => [u._id, withId(u)]));
+  const members = new Map(memberDocs.map((u) => [cryptoApi.extId(u.username), withId(u)]));
   const seenRemote = new Set();
   const remoteStakes = [];
   for (const rsvp of remoteEvent.rsvps) {
@@ -1170,22 +1147,24 @@ async function settleStakeAndMirror(h, attendeeIds, { complete = false } = {}) {
     seenRemote.add(rsvp.userId);
     remoteStakes.push(user.id);
   }
-  db.transaction(() => {
-    const insert = db.prepare(`INSERT INTO hangout_stakes (hangout_id, user_id, staked_at)
-      VALUES (?, ?, ?) ON CONFLICT(hangout_id, user_id) DO NOTHING`);
-    for (const userId of remoteStakes) insert.run(current.id, userId, now());
-    const mirrored = db.prepare(`SELECT hs.user_id, u.username
-      FROM hangout_stakes hs JOIN users u ON u.id = hs.user_id
-      WHERE hs.hangout_id = ?`).all(current.id);
-    const remove = db.prepare('DELETE FROM hangout_stakes WHERE hangout_id = ? AND user_id = ?');
-    for (const entry of mirrored) {
-      if (!seenRemote.has(cryptoApi.extId(entry.username))) remove.run(current.id, entry.user_id);
-    }
-  })();
+  // Mirror the durable remote RSVP set: drop local stakes that are not durable
+  // remotely, then add missing remote stakes idempotently (a retry repairs any
+  // partial progress).
+  await store.hangouts.updateOne(
+    { _id: current.id },
+    { $pull: { stakes: { user_id: { $nin: remoteStakes } } } },
+  );
+  for (const userId of remoteStakes) {
+    await store.hangouts.updateOne(
+      { _id: current.id, 'stakes.user_id': { $ne: userId } },
+      { $push: { stakes: { user_id: userId, staked_at: now() } } },
+    );
+  }
 
-  const localStakes = db.prepare(`SELECT hs.user_id, u.username
-    FROM hangout_stakes hs JOIN users u ON u.id = hs.user_id
-    WHERE hs.hangout_id = ? ORDER BY hs.user_id`).all(current.id);
+  const mirrored = await getHangout(current.id);
+  const localStakes = [...(mirrored.stakes || [])]
+    .sort((a, b) => a.user_id - b.user_id)
+    .map((s) => ({ user_id: s.user_id, username: usersById.get(s.user_id).username }));
   if (remoteEvent.status !== 'settled') {
     // Both a photo taker and either side of an NFC confirmation count as present.
     // A failed check-in aborts settlement; it is never swallowed as a no-show.
@@ -1251,128 +1230,148 @@ async function settleStakeAndMirror(h, attendeeIds, { complete = false } = {}) {
       throw invalidCryptoUpstream();
     }
     seen.add(entry.userId);
-    validated.push({ ...entry, userId: local.user_id });
+    validated.push({
+      user_id: local.user_id,
+      status: entry.status,
+      payout_units: entry.payoutUnits,
+    });
   }
   if (BigInt(result.forfeitPoolUnits) !== expectedForfeit) {
     throw invalidCryptoUpstream();
   }
 
-  db.transaction(() => {
-    db.prepare('DELETE FROM hangout_settlements WHERE hangout_id = ?').run(current.id);
-    const insert = db.prepare(`INSERT INTO hangout_settlements
-      (hangout_id, user_id, status, payout_units) VALUES (?, ?, ?, ?)`);
-    for (const entry of validated) {
-      insert.run(current.id, entry.userId, entry.status, entry.payoutUnits);
-    }
-    db.prepare('UPDATE hangouts SET settled_at = COALESCE(settled_at, ?) WHERE id = ?')
-      .run(now(), current.id);
-    if (complete) finishHangoutLocally(current.id);
-  })();
-  return db.prepare('SELECT * FROM hangouts WHERE id = ?').get(current.id);
+  // One atomic document update publishes the settlement (and completion, when
+  // requested) or nothing at all — the SQLite transaction's equivalent.
+  const timestamp = now();
+  const publish = {
+    settlements: { $literal: validated },
+    settled_at: { $ifNull: ['$settled_at', timestamp] },
+  };
+  if (complete) publish.completed_at = { $ifNull: ['$completed_at', timestamp] };
+  await store.hangouts.updateOne({ _id: current.id }, [{ $set: publish }]);
+  return getHangout(current.id);
 }
 
-app.get('/hangouts', auth, (req, res) => {
-  const rows = db.prepare(`SELECT h.* FROM hangouts h
-    JOIN hangout_members m ON m.hangout_id = h.id
-    WHERE m.user_id = ? ORDER BY h.date DESC`).all(req.user.id);
-  res.json({ hangouts: rows.map((h) => hangoutView(h, req.user.id)) });
-});
+app.get('/hangouts', auth, asyncRoute(async (req, res) => {
+  const rows = await store.hangouts
+    .find({ member_ids: req.user.id })
+    .sort({ date: -1 })
+    .toArray();
+  const hangouts = [];
+  for (const h of rows) hangouts.push(await hangoutView(h, req.user.id));
+  res.json({ hangouts });
+}));
 
-app.get('/hangouts/:id', auth, (req, res) => {
-  const h = db.prepare('SELECT * FROM hangouts WHERE id = ?').get(req.params.id);
-  if (!h || !memberIds(h.id).includes(req.user.id))
+app.get('/hangouts/:id', auth, asyncRoute(async (req, res) => {
+  const h = await getHangout(parseId(req.params.id));
+  if (!h || !h.member_ids.includes(req.user.id))
     return res.status(404).json({ error: 'Hangout not found' });
-  res.json({ hangout: hangoutView(h, req.user.id) });
-});
+  res.json({ hangout: await hangoutView(h, req.user.id) });
+}));
 
-app.post('/hangouts/:id/photo', auth, upload.single('photo'), (req, res) => {
-  const h = db.prepare('SELECT * FROM hangouts WHERE id = ?').get(req.params.id);
-  if (!h || !memberIds(h.id).includes(req.user.id))
+app.post('/hangouts/:id/photo', auth, upload.single('photo'), asyncRoute(async (req, res) => {
+  const h = await getHangout(parseId(req.params.id));
+  if (!h || !h.member_ids.includes(req.user.id))
     return res.status(404).json({ error: 'Hangout not found' });
   if (!req.file) return res.status(400).json({ error: 'No photo attached' });
-  db.prepare('UPDATE hangouts SET photo = ?, photo_by = ? WHERE id = ?').run(req.file.filename, req.user.id, h.id);
-  maybeComplete(h.id);
-  res.json({ hangout: hangoutView(db.prepare('SELECT * FROM hangouts WHERE id = ?').get(h.id), req.user.id) });
-});
+  await store.hangouts.updateOne(
+    { _id: h.id },
+    { $set: { photo: req.file.filename, photo_by: req.user.id } },
+  );
+  await maybeComplete(h.id);
+  res.json({ hangout: await hangoutView(await getHangout(h.id), req.user.id) });
+}));
 
 // End the hangout with whoever showed up, even if some pairs never tapped.
 // Requires the hangout to have started and a photo (proof). Attendees are the
 // photo taker + anyone who confirmed; no-shows are the rest. Settles the pool
 // (checking attendees in first) so no-shows' stakes go to the friends who came.
 app.post('/hangouts/:id/end', auth, asyncRoute(async (req, res) => {
-  const h = db.prepare('SELECT * FROM hangouts WHERE id = ?').get(req.params.id);
-  if (!h || !memberIds(h.id).includes(req.user.id))
+  const h = await getHangout(parseId(req.params.id));
+  if (!h || !h.member_ids.includes(req.user.id))
     return res.status(404).json({ error: 'Hangout not found' });
-  if (h.completed_at) return res.json({ hangout: hangoutView(h, req.user.id) });
+  if (h.completed_at) return res.json({ hangout: await hangoutView(h, req.user.id) });
   if (new Date(h.date).getTime() > Date.now())
     return res.status(400).json({ error: 'Cannot end before the hangout starts' });
   if (!h.photo) return res.status(400).json({ error: 'Take the photo first, then end it' });
 
-  const ids = memberIds(h.id);
-  const attendees = attendeeIdSet(h, ids);
+  const attendees = attendeeIdSet(h);
   try {
     const ended = await settleStakeAndMirror(h, attendees, { complete: true });
-    return res.json({ hangout: hangoutView(ended, req.user.id) });
+    return res.json({ hangout: await hangoutView(ended, req.user.id) });
   } catch (error) {
     return sendCryptoError(res, error);
   }
 }));
 
 // NFC: the "show" phone fetches a short-lived token, encodes it over HCE.
-app.get('/hangouts/:id/nfc-token', auth, (req, res) => {
-  const h = db.prepare('SELECT * FROM hangouts WHERE id = ?').get(req.params.id);
-  if (!h || !memberIds(h.id).includes(req.user.id))
+app.get('/hangouts/:id/nfc-token', auth, asyncRoute(async (req, res) => {
+  const h = await getHangout(parseId(req.params.id));
+  if (!h || !h.member_ids.includes(req.user.id))
     return res.status(404).json({ error: 'Hangout not found' });
   const token = crypto.randomBytes(6).toString('hex');
-  db.prepare(`INSERT INTO nfc_tokens (hangout_id, user_id, token, expires_at) VALUES (?, ?, ?, ?)
-    ON CONFLICT(hangout_id, user_id) DO UPDATE SET token = excluded.token, expires_at = excluded.expires_at`)
-    .run(h.id, req.user.id, token, Date.now() + 10 * 60 * 1000);
+  const expiresAt = Date.now() + 10 * 60 * 1000;
+  const replaced = await store.hangouts.updateOne(
+    { _id: h.id, 'nfc_tokens.user_id': req.user.id },
+    { $set: { 'nfc_tokens.$.token': token, 'nfc_tokens.$.expires_at': expiresAt } },
+  );
+  if (replaced.matchedCount === 0) {
+    await store.hangouts.updateOne(
+      { _id: h.id, 'nfc_tokens.user_id': { $ne: req.user.id } },
+      { $push: { nfc_tokens: { user_id: req.user.id, token, expires_at: expiresAt } } },
+    );
+  }
   res.json({ payload: `TY1|${h.id}|${req.user.username}|${token}` });
-});
+}));
 
 // The "scan" phone posts what it read.
 app.post('/hangouts/:id/confirm', auth, asyncRoute(async (req, res) => {
-  const h = db.prepare('SELECT * FROM hangouts WHERE id = ?').get(req.params.id);
-  if (!h || !memberIds(h.id).includes(req.user.id))
+  const h = await getHangout(parseId(req.params.id));
+  if (!h || !h.member_ids.includes(req.user.id))
     return res.status(404).json({ error: 'Hangout not found' });
   const { username, token } = req.body || {};
-  const other = db.prepare('SELECT * FROM users WHERE username = ?').get(username || '');
-  if (!other || !memberIds(h.id).includes(other.id))
+  const other = await getUserByUsername(username);
+  if (!other || !h.member_ids.includes(other.id))
     return res.status(400).json({ error: 'That person is not in this hangout' });
   if (other.id === req.user.id) return res.status(400).json({ error: 'Cannot confirm with yourself' });
   const [u1, u2] = pair(req.user.id, other.id);
-  const already = db.prepare('SELECT 1 FROM confirms WHERE hangout_id = ? AND u1 = ? AND u2 = ?').get(h.id, u1, u2);
+  const already = (h.confirms || []).some((c) => c.u1 === u1 && c.u2 === u2);
   if (!already) {
-    const t = db.prepare('SELECT * FROM nfc_tokens WHERE hangout_id = ? AND user_id = ?').get(h.id, other.id);
+    const t = (h.nfc_tokens || []).find((entry) => entry.user_id === other.id);
     if (!t || t.token !== token || t.expires_at < Date.now())
       return res.status(400).json({ error: 'Tap not valid, try again' });
   }
   let vibeGain = 0;
   let acornGain = 0;
   if (!already) {
-    db.prepare('INSERT INTO confirms (hangout_id, u1, u2, confirmed_at) VALUES (?, ?, ?, ?)')
-      .run(h.id, u1, u2, now());
-    const f = friendship(u1, u2);
-    if (f) {
-      vibeGain = Math.round(VIBE_PER_CONFIRM * h.bonus_mult);
-      const before = level(f.vibe);
-      const after = level(f.vibe + vibeGain);
-      db.prepare('UPDATE friendships SET vibe = vibe + ? WHERE id = ?').run(vibeGain, f.id);
-      if (after > before) {
-        acornGain = ACORNS_PER_LEVEL * (after - before);
-        db.prepare('UPDATE users SET acorns = acorns + ? WHERE id IN (?, ?)').run(acornGain, u1, u2);
+    const inserted = await store.hangouts.updateOne(
+      { _id: h.id, confirms: { $not: { $elemMatch: { u1, u2 } } } },
+      { $push: { confirms: { u1, u2, confirmed_at: now() } } },
+    );
+    if (inserted.matchedCount === 1) {
+      const f = await friendship(u1, u2);
+      if (f) {
+        vibeGain = Math.round(VIBE_PER_CONFIRM * h.bonus_mult);
+        const before = level(f.vibe);
+        const after = level(f.vibe + vibeGain);
+        await store.friendships.updateOne({ _id: f.id }, { $inc: { vibe: vibeGain } });
+        if (after > before) {
+          acornGain = ACORNS_PER_LEVEL * (after - before);
+          await store.users.updateMany({ _id: { $in: [u1, u2] } }, { $inc: { acorns: acornGain } });
+        }
       }
+      await maybeComplete(h.id);
     }
-    maybeComplete(h.id);
   }
   // Retry attendance sync even when this confirmation already existed (for
   // example, because a previous crypto response was lost). A failed check-in
   // never erases local proof; settlement replays it as a hard safety boundary.
   if (h.crypto_event_id) {
+    const fresh = await getHangout(h.id);
+    const stakedIds = new Set((fresh.stakes || []).map((s) => s.user_id));
     const checkins = [];
     for (const [uid, uname] of [[req.user.id, req.user.username], [other.id, other.username]]) {
-      const staked = db.prepare('SELECT 1 FROM hangout_stakes WHERE hangout_id = ? AND user_id = ?').get(h.id, uid);
-      if (staked) checkins.push(cryptoApi.checkin(h.crypto_event_id, uname));
+      if (stakedIds.has(uid)) checkins.push(cryptoApi.checkin(h.crypto_event_id, uname));
     }
     try {
       await Promise.all(checkins);
@@ -1381,7 +1380,7 @@ app.post('/hangouts/:id/confirm', auth, asyncRoute(async (req, res) => {
     }
   }
   res.json({
-    hangout: hangoutView(db.prepare('SELECT * FROM hangouts WHERE id = ?').get(h.id), req.user.id),
+    hangout: await hangoutView(await getHangout(h.id), req.user.id),
     vibeGain,
     acornGain,
     bonusReason: h.bonus_reason,
@@ -1389,51 +1388,58 @@ app.post('/hangouts/:id/confirm', auth, asyncRoute(async (req, res) => {
 }));
 
 // ---------- memory book ----------
-app.get('/memories', auth, (req, res) => {
-  const rows = db.prepare(`SELECT h.* FROM hangouts h
-    JOIN hangout_members m ON m.hangout_id = h.id
-    WHERE m.user_id = ? AND h.completed_at IS NOT NULL
-    ORDER BY h.date DESC`).all(req.user.id);
-  res.json({ memories: rows.map((h) => hangoutView(h, req.user.id)) });
-});
+app.get('/memories', auth, asyncRoute(async (req, res) => {
+  const rows = await store.hangouts
+    .find({ member_ids: req.user.id, completed_at: { $ne: null } })
+    .sort({ date: -1 })
+    .toArray();
+  const memories = [];
+  for (const h of rows) memories.push(await hangoutView(h, req.user.id));
+  res.json({ memories });
+}));
 
 // ---------- leaderboard ----------
-app.get('/leaderboard', auth, (req, res) => {
+app.get('/leaderboard', auth, asyncRoute(async (req, res) => {
   const me = req.user.id;
-  const fr = db.prepare(
-    `SELECT * FROM friendships WHERE (a_id = ? OR b_id = ?) AND status = 'accepted'`).all(me, me);
+  const fr = await store.friendships
+    .find({ $or: [{ a_id: me }, { b_id: me }], status: 'accepted' })
+    .toArray();
   const ids = [me, ...fr.map((f) => (f.a_id === me ? f.b_id : f.a_id))];
   const monthStart = new Date();
   monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-  const rows = ids.map((id) => {
-    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-    const count = db.prepare(`SELECT COUNT(*) c FROM hangouts h
-      JOIN hangout_members m ON m.hangout_id = h.id
-      WHERE m.user_id = ? AND h.completed_at IS NOT NULL AND h.date >= ?`)
-      .get(id, monthStart.toISOString()).c;
-    return { ...publicUser(u), count, isMe: id === me };
-  }).sort((x, y) => y.count - x.count);
+  const rows = [];
+  for (const id of ids) {
+    const u = await getUser(id);
+    const count = await store.hangouts.countDocuments({
+      member_ids: id,
+      completed_at: { $ne: null },
+      date: { $gte: monthStart.toISOString() },
+    });
+    rows.push({ ...publicUser(u), count, isMe: id === me });
+  }
+  rows.sort((x, y) => y.count - x.count);
   res.json({ leaderboard: rows, month: monthStart.toISOString().slice(0, 7) });
-});
+}));
 
 // ---------- wardrobe ----------
-app.post('/shop/buy', auth, (req, res) => {
+app.post('/shop/buy', auth, asyncRoute(async (req, res) => {
   const item = ITEMS.find((i) => i.id === req.body?.itemId);
   if (!item) return res.status(404).json({ error: 'No such item' });
-  const owned = JSON.parse(req.user.owned);
+  const owned = safeJsonArray(req.user.owned);
   if (owned.includes(item.id)) return res.status(409).json({ error: 'Already owned' });
   if (req.user.acorns < item.price) return res.status(400).json({ error: 'Not enough acorns' });
-  owned.push(item.id);
-  db.prepare('UPDATE users SET acorns = acorns - ?, owned = ? WHERE id = ?')
-    .run(item.price, JSON.stringify(owned), req.user.id);
-  res.json({ me: meView(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)) });
-});
+  await store.users.updateOne(
+    { _id: req.user.id, owned: { $ne: item.id }, acorns: { $gte: item.price } },
+    { $inc: { acorns: -item.price }, $push: { owned: item.id } },
+  );
+  res.json({ me: meView(await getUser(req.user.id)) });
+}));
 
 // Easter egg: tapping the Leaderboard title rains acorns. Sshh.
-app.post('/secret/acorns', auth, (req, res) => {
-  db.prepare('UPDATE users SET acorns = acorns + 10 WHERE id = ?').run(req.user.id);
-  res.json({ me: meView(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)) });
-});
+app.post('/secret/acorns', auth, asyncRoute(async (req, res) => {
+  await store.users.updateOne({ _id: req.user.id }, { $inc: { acorns: 10 } });
+  res.json({ me: meView(await getUser(req.user.id)) });
+}));
 
 // ---------- wallet (USDC via Unifold treasury) ----------
 app.get('/wallet', auth, asyncRoute(async (req, res) => {
@@ -1614,12 +1620,12 @@ function attachWorldServer(server) {
     }
     const entry = consumeWorldTicket(url.searchParams.get('ticket'));
     if (!entry) return rejectWorldUpgrade(socket);
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(entry.userId);
-    if (!user) return rejectWorldUpgrade(socket);
-
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit('connection', ws, req, user);
-    });
+    getUser(entry.userId).then((user) => {
+      if (!user) return rejectWorldUpgrade(socket);
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit('connection', ws, req, user);
+      });
+    }, () => rejectWorldUpgrade(socket));
   });
 
   wss.on('connection', (ws, _req, user) => {
@@ -1628,11 +1634,12 @@ function attachWorldServer(server) {
     // Position is saved, or a fresh spawn is persisted immediately.
     let x = user.pos_x;
     let y = user.pos_y;
+    let spawnPersisted = Promise.resolve();
     if (x == null || y == null) {
       const spawn = spawnPoint();
       x = spawn.x;
       y = spawn.y;
-      db.prepare('UPDATE users SET pos_x = ?, pos_y = ? WHERE id = ?').run(x, y, user.id);
+      spawnPersisted = store.users.updateOne({ _id: user.id }, { $set: { pos_x: x, pos_y: y } });
       user.pos_x = x;
       user.pos_y = y;
     }
@@ -1642,14 +1649,20 @@ function attachWorldServer(server) {
       previous.ws.close(4002, 'replaced');
     }
 
-    // Send initial state: every player who has ever entered the world.
-    const all = db.prepare('SELECT * FROM users WHERE pos_x IS NOT NULL').all();
-    ws.send(JSON.stringify({
-      type: 'init',
-      world: { w: WORLD_W, h: WORLD_H },
-      me: user.username,
-      players: all.map((candidate) => worldPlayer(candidate, live.has(candidate.username))),
-    }));
+    // Send initial state: every player who has ever entered the world. A fresh
+    // spawn must be durable first so this player appears in their own snapshot.
+    spawnPersisted
+      .then(() => store.users.find({ pos_x: { $ne: null } }).toArray())
+      .then((all) => {
+        if (ws.readyState !== 1) return;
+        ws.send(JSON.stringify({
+          type: 'init',
+          world: { w: WORLD_W, h: WORLD_H },
+          me: user.username,
+          players: all.map((candidate) => worldPlayer(candidate, live.has(candidate.username))),
+        }));
+      })
+      .catch(() => ws.close(1011, 'init failed'));
     broadcastWorld(live, { type: 'join', player: worldPlayer(user, true) }, user.username);
 
     let lastPersist = 0;
@@ -1668,14 +1681,14 @@ function attachWorldServer(server) {
       const timestamp = Date.now();
       if (timestamp - lastPersist > 1500) {
         lastPersist = timestamp;
-        db.prepare('UPDATE users SET pos_x = ?, pos_y = ? WHERE id = ?').run(nx, ny, user.id);
+        store.users.updateOne({ _id: user.id }, { $set: { pos_x: nx, pos_y: ny } }).catch(() => {});
       }
     });
 
     ws.on('close', () => {
       const c = live.get(user.username);
       if (!c || c.ws !== ws) return;
-      db.prepare('UPDATE users SET pos_x = ?, pos_y = ? WHERE id = ?').run(c.x, c.y, user.id);
+      store.users.updateOne({ _id: user.id }, { $set: { pos_x: c.x, pos_y: c.y } }).catch(() => {});
       live.delete(user.username);
       broadcastWorld(live, { type: 'offline', username: user.username });
     });
@@ -1716,13 +1729,21 @@ app.use((error, _req, res, _next) => {
 });
 
 if (require.main === module) {
-  const server = createServer();
-  server.listen(PORT, () => console.log(`Tomo Together server on :${PORT} (+ /ws world)`));
+  init().then(() => {
+    const server = createServer();
+    server.listen(PORT, () => console.log(`Tomo Together server on :${PORT} (+ /ws world)`));
+  }).catch((error) => {
+    // Never print the connection string; the message is enough to diagnose.
+    console.error('MongoDB initialization failed:', error && error.message);
+    process.exit(1);
+  });
 }
 
 module.exports = {
   app,
-  db,
+  init,
+  closeDb,
+  store,
   attachWorldServer,
   createServer,
   worldTicketTtlMs,

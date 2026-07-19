@@ -326,32 +326,36 @@ Expo SDK 57 [SecureStore documentation](https://docs.expo.dev/versions/v57.0.0/s
 
 ### 6. Migrate the five legacy users deliberately
 
-Production currently has five legacy SQLite users. `ALLOW_LEGACY_AUTH=true` keeps
-their existing 48-hex-character bearer sessions and password login working during
-the transition, but it does not link them to Auth0. Use this small, auditable bulk
-import/backfill plan instead of matching identities by mutable email or display
-name:
+Production currently has five legacy users (created before Auth0).
+`ALLOW_LEGACY_AUTH=true` keeps their existing 48-hex-character bearer sessions
+and password login working during the transition, but it does not link them to
+Auth0. Use this small, auditable bulk import/backfill plan instead of matching
+identities by mutable email or display name:
 
-1. Back up `/home/data/tomoyard.sqlite`, stop account creation briefly, and export
-   exactly the five rows needed for migration (`id`, `username`, legacy scrypt
-   hash, and salt). Never put that export in this repository or logs.
+1. Back up the `users` collection of the `tomoyard` MongoDB database, stop
+   account creation briefly, and export exactly the five documents needed for
+   migration (`_id`, `username`, legacy scrypt hash, and salt) with
+   `server/scripts/export-auth0-users.js`. Never put that export in this
+   repository or logs.
 2. Enable username identifiers on the Auth0 database connection; the five rows do
    not have email addresses, so do not fabricate them. Do not combine trickle
    migration with this bulk import.
 3. Build an ephemeral Auth0 import file with deterministic `user_id` values of
-   `tomoyard-<sqlite-id>`. The current server uses
+   `tomoyard-<id>` (the user's integer `_id`). The current server uses
    `crypto.scryptSync(password, textualSalt, 32)`, so each
    `custom_password_hash` must specify `algorithm: "scrypt"`, hex hash, UTF-8 salt
    and password encodings, `keylen: 32`, `cost: 16384`, `blockSize: 8`, and
    `parallelization: 1`. Submit once with `upsert=false`; require exactly five
    inserts and zero failures. If an exact import cannot be proven, use Auth0
    password-reset tickets instead of collecting plaintext passwords.
-4. Auth0 prefixes imported database IDs with `auth0|`. In one `BEGIN IMMEDIATE`
-   SQLite transaction, add the nullable `auth0_sub` column if needed, create its
-   unique partial index, and backfill row `<id>` with
-   `auth0|tomoyard-<id>`. Abort on any count other than five, duplicate subject,
-   duplicate username, missing row, or non-null pre-existing subject. Do not use
-   an email or username-only runtime auto-link.
+4. Auth0 prefixes imported database IDs with `auth0|`. Run
+   `server/scripts/backfill-auth0-subjects.js`: it snapshots the five target
+   documents to a private JSON backup, ensures the `users_auth0_sub_unique`
+   unique partial index, and backfills document `<id>` with `auth0|tomoyard-<id>`
+   using per-document conditional updates that roll back on any failure. It
+   aborts on any count other than five, duplicate subject, duplicate username,
+   missing document, or non-null pre-existing subject. Do not use an email or
+   username-only runtime auto-link.
 5. Verify all five users can sign in through Universal Login and retain their
    existing friends, hangouts, wardrobe, and wallet mapping. Keep the backup and a
    reversible subject-to-row manifest outside the repo for the migration window.
@@ -364,9 +368,12 @@ and the [user import schema](https://auth0.com/docs/manage-users/user-migration/
 
 ## Configure MongoDB Atlas
 
-Atlas is the durable store for the crypto ledger and event/idempotency data. The
-main Tomo Yard social data still uses SQLite; do not claim that the entire app was
-migrated to Atlas.
+Atlas is the durable store for everything: the crypto ledger and
+event/idempotency data live in `ht6_crypto`, and the main Tomo Yard social data
+(users, friends, hangouts, activity weights) lives in the separate `tomoyard`
+database on the same cluster. SQLite is fully retired; see
+[the SQLite-to-MongoDB migration runbook](sqlite-to-mongodb-migration.md) for
+the one-time data cutover.
 
 ### 1. Verify the cluster
 
@@ -380,24 +387,34 @@ snapshots are worth the added cost. Atlas documents the
 [free-tier limitations](https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/)
 and [Flex backup behavior](https://www.mongodb.com/docs/atlas/backup/cloud-backup/flex-cluster-backup/).
 
-### 2. Verify the application database user
+### 2. Verify the application database users
 
-The dedicated database user is `tomo-yard-crypto`, not an Atlas dashboard user. It
-has only `readWrite` on `ht6_crypto`. Its password exists only inside the Key Vault
-`mongodb-uri` connection string. Atlas documents the distinction and roles in
+There are two dedicated database users, not Atlas dashboard users:
+
+- `tomo-yard-crypto` has only `readWrite` on `ht6_crypto`. Its password exists
+  only inside the Key Vault `mongodb-uri` connection string.
+- `tomo-yard-app` has only `readWrite` on `tomoyard` (the main server's social
+  data). Its password exists only inside the Key Vault `mongodb-uri-app`
+  connection string.
+
+Neither user can read the other's database, so the main server still has no
+access to the crypto ledger. Atlas documents the distinction and roles in
 [Configure Database Users](https://www.mongodb.com/docs/atlas/security-add-mongodb-users/).
 
 Copy the Node.js `mongodb+srv://` driver URI. Add the database name or keep it in
 `MONGODB_DB_NAME`. Percent-encode reserved characters in the username/password.
 Never log the URI.
 
-### 3. Allow only the crypto service's outbound addresses
+### 3. Allow only the App Services' outbound addresses
 
-After Azure has provisioned `ht6-tomoyard-crypto`, collect every possible outbound
-address from the Terraform output:
+After Azure has provisioned the App Services, collect every possible outbound
+address from the Terraform outputs. Both apps share one App Service plan, so the
+two lists are normally identical — but verify both, because the main server now
+also reaches Atlas:
 
 ```powershell
 terraform -chdir=infra output -json crypto_possible_outbound_ip_addresses
+terraform -chdir=infra output -json app_possible_outbound_ip_addresses
 ```
 
 The direct Azure query is a useful cross-check; use the **possible** list, not only
@@ -662,8 +679,9 @@ change is incompatible and the restore has been rehearsed.
 ### Rotate credentials
 
 - **MongoDB:** create a second least-privilege database user, update the Key Vault
-  secret `mongodb-uri`, force a Key Vault reference refresh or restart, verify
-  `/ready`, then delete the old user.
+  secret (`mongodb-uri` for the crypto service, `mongodb-uri-app` for the main
+  server), force a Key Vault reference refresh or restart, verify `/ready` (crypto)
+  or `/health` (main), then delete the old user.
 - **Crypto service token:** there is no dual-token overlap today. Remove
   `CRYPTO_API_URL`, replace the Terraform-managed `random_password` value so both
   services update together, verify internally, then restore the URL through
@@ -687,11 +705,11 @@ does:
 - Add "Google login", "email OTP", or "MFA" only after that exact flow has passed on
   the demo build and tenant.
 - **MongoDB Atlas:** "Atlas is the durable store for the real-USDC ledger, withdrawal
-  state, hangout staking events, and idempotency records. Unique indexes prevent
-  duplicate grants, transfers, and event processing, and the state survives an app
-  restart."
-- Be explicit that the main profiles/friends database remains SQLite and that the
-  hackathon cluster is M0 without managed backups.
+  state, hangout staking events, and idempotency records — and, in a separate
+  database with a separate least-privilege user, the main profiles/friends/hangouts
+  data. Unique indexes prevent duplicate grants, transfers, and event processing,
+  and the state survives an app restart."
+- Be explicit that the hackathon cluster is M0 without managed backups.
 - **Crypto safety:** "The money service is separately deployed, authenticated
   server-to-server, and gated by `CRYPTO_API_URL`. We can disable the entire money
   surface immediately without shipping a new APK. Automatic real-USDC grants and

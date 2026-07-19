@@ -10,7 +10,6 @@ const WebSocket = require('ws');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tomoyard-world-'));
 process.env.DATA_DIR = dataDir;
-process.env.SQLITE_JOURNAL = 'delete';
 process.env.NODE_ENV = 'test';
 process.env.WORLD_WS_TICKET_TTL_MS = '80';
 process.env.ALLOW_LEGACY_AUTH = 'true';
@@ -54,7 +53,10 @@ require.cache[auth0Path].exports = {
   },
 };
 
-const { createServer, db, worldTicketTtlMs } = require('../index');
+const { startTestMongo } = require('../test-helpers/mongo');
+const { createServer, init, closeDb, store, worldTicketTtlMs } = require('../index');
+const { nextId } = require('../db');
+let mongod;
 let server;
 let httpBaseUrl;
 let wsBaseUrl;
@@ -69,22 +71,43 @@ function captureConsole(method) {
   };
 }
 
+async function insertUser({ username, name, birthday, token, auth0Sub, color, species }) {
+  await store.users.insertOne({
+    _id: await nextId('users'),
+    username,
+    name,
+    birthday,
+    pass_hash: 'unused',
+    salt: 'unused',
+    token,
+    auth0_sub: auth0Sub,
+    acorns: 50,
+    color,
+    species,
+    owned: [],
+    equipped: [],
+    interests: [],
+    pos_x: null,
+    pos_y: null,
+    created_at: new Date().toISOString(),
+  });
+}
+
 before(async () => {
   captureConsole('log');
   captureConsole('warn');
   captureConsole('error');
 
-  const insertUser = db.prepare(`INSERT INTO users
-    (username, name, birthday, pass_hash, salt, token, auth0_sub, color, species, interests, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  insertUser.run(
-    'world_legacy', 'World Legacy', '2000-01-01', 'unused', 'unused', LEGACY_TOKEN,
-    null, '#A8D8C8', 'cat', '[]', new Date().toISOString(),
-  );
-  insertUser.run(
-    'world_auth0', 'World Auth0', '2001-02-03', 'auth0-disabled:test', 'auth0-disabled:test',
-    'auth0-disabled:world-test', AUTH0_SUB, '#123ABC', 'frog', '[]', new Date().toISOString(),
-  );
+  mongod = await startTestMongo();
+  await init();
+  await insertUser({
+    username: 'world_legacy', name: 'World Legacy', birthday: '2000-01-01',
+    token: LEGACY_TOKEN, auth0Sub: null, color: '#A8D8C8', species: 'cat',
+  });
+  await insertUser({
+    username: 'world_auth0', name: 'World Auth0', birthday: '2001-02-03',
+    token: 'auth0-disabled:world-test', auth0Sub: AUTH0_SUB, color: '#123ABC', species: 'frog',
+  });
 
   server = createServer();
   server.listen(0, '127.0.0.1');
@@ -99,7 +122,8 @@ after(async () => {
   console.warn = originalConsole.warn;
   console.error = originalConsole.error;
   if (server) await new Promise((resolve) => server.close(resolve));
-  db.close();
+  await closeDb();
+  if (mongod) await mongod.stop();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 

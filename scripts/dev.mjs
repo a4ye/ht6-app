@@ -44,6 +44,11 @@ for (const [name, dir] of [['custody', custodyDir], ['server', serverDir]]) {
     console.log(`[dev] ${name}: node_modules missing — run \`npm --prefix ${name === 'server' ? 'server' : 'custody'} install\` first.`);
   }
 }
+if (!process.env.MONGODB_URI) {
+  console.log(
+    '[dev] main server expects MongoDB at mongodb://127.0.0.1:27017 (set MONGODB_URI to override) — e.g. `docker run -d -p 27017:27017 mongo:7`.',
+  );
+}
 if (CRYPTO_SERVICE_TOKEN.length < 32) {
   console.log(
     '[dev] No valid CRYPTO_SERVICE_TOKEN in custody/.env (need >=32 chars) — the main server will run with crypto DISABLED until you add one. See docs/unifold-deposit-runbook.md.',

@@ -6,9 +6,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const test = require('node:test');
-const Database = require('better-sqlite3');
+const { after, before, test } = require('node:test');
+const { MongoClient } = require('mongodb');
 
+const { startTestMongo } = require('../test-helpers/mongo');
 const {
   MigrationSafetyError,
   backfillAuth0Subjects,
@@ -16,67 +17,73 @@ const {
   parseImportPayload,
 } = require('../scripts/auth0-legacy-migration');
 
+let mongod;
+let client;
+let databaseCounter = 0;
+
+before(async () => {
+  mongod = await startTestMongo();
+  client = new MongoClient(mongod.getUri());
+  await client.connect();
+});
+
+after(async () => {
+  if (client) await client.close();
+  if (mongod) await mongod.stop();
+});
+
+function freshDb() {
+  databaseCounter += 1;
+  return client.db(`legacy_migration_${databaseCounter}`);
+}
+
 function temporaryWorkspace(t) {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tomoyard-auth0-migration-')));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   return directory;
 }
 
-function createLegacyDatabase(databasePath, {
-  includeAuth0Subject = false,
+async function createLegacyUsers(db, {
   duplicateUsername = false,
   invalidHashAt = null,
 } = {}) {
-  const db = new Database(databasePath);
-  db.exec(`
-    CREATE TABLE users (
-      id INTEGER PRIMARY KEY,
-      username TEXT NOT NULL,
-      name TEXT NOT NULL,
-      pass_hash TEXT NOT NULL,
-      salt TEXT NOT NULL
-      ${includeAuth0Subject ? ', auth0_sub TEXT' : ''}
-    )
-  `);
-  const columns = includeAuth0Subject
-    ? '(id, username, name, pass_hash, salt, auth0_sub) VALUES (?, ?, ?, ?, ?, NULL)'
-    : '(id, username, name, pass_hash, salt) VALUES (?, ?, ?, ?, ?)';
-  const insert = db.prepare(`INSERT INTO users ${columns}`);
+  const users = db.collection('users');
   for (let id = 1; id <= 5; id += 1) {
     const salt = String(id).padStart(16, '0');
     const passHash = invalidHashAt === id
       ? 'not-a-scrypt-hash'
       : crypto.scryptSync(`secret-${id}`, salt, 32).toString('hex');
     const username = duplicateUsername && id === 5 ? 'legacy_1' : `legacy_${id}`;
-    insert.run(id, username, `Legacy User ${id}`, passHash, salt);
+    await users.insertOne({
+      _id: id,
+      username,
+      name: `Legacy User ${id}`,
+      pass_hash: passHash,
+      salt,
+      auth0_sub: null,
+    });
   }
-  db.close();
 }
 
-function readColumns(databasePath) {
-  const db = new Database(databasePath, { readonly: true });
-  try {
-    return db.prepare('PRAGMA table_info(users)').all().map((column) => column.name);
-  } finally {
-    db.close();
-  }
+async function linkedSubjectCount(db) {
+  return db.collection('users').countDocuments({ auth0_sub: { $type: 'string' } });
 }
 
 function assertSafetyCode(error, code) {
   return error instanceof MigrationSafetyError && error.code === code;
 }
 
-test('export writes the exact Auth0 scrypt schema without fabricating email data', (t) => {
+test('export writes the exact Auth0 scrypt schema without fabricating email data', async (t) => {
   const directory = temporaryWorkspace(t);
-  const databasePath = path.join(directory, 'legacy.sqlite');
   const outputPath = path.join(directory, 'auth0-import.json');
-  createLegacyDatabase(databasePath);
+  const db = freshDb();
+  await createLegacyUsers(db);
 
-  const dryRun = exportAuth0Users({ dbPath: databasePath, outputPath, dryRun: true });
+  const dryRun = await exportAuth0Users({ db, outputPath, dryRun: true });
   assert.deepEqual(dryRun, { mode: 'dry-run', count: 5, output: outputPath });
   assert.equal(fs.existsSync(outputPath), false);
 
-  const written = exportAuth0Users({ dbPath: databasePath, outputPath });
+  const written = await exportAuth0Users({ db, outputPath });
   assert.deepEqual(written, { mode: 'write', count: 5, output: outputPath });
   const payload = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
   assert.equal(payload.length, 5);
@@ -101,52 +108,54 @@ test('export writes the exact Auth0 scrypt schema without fabricating email data
   assert.equal(payload.some((record) => Object.hasOwn(record, 'email')), false);
 
   assert.deepEqual(
-    exportAuth0Users({ dbPath: databasePath, outputPath, verify: true }),
+    await exportAuth0Users({ db, outputPath, verify: true }),
     { mode: 'verify', count: 5, output: outputPath },
   );
 });
 
-test('export refuses invalid legacy formats, identity collisions, and repository output paths', (t) => {
+test('export refuses invalid legacy formats, identity collisions, and repository output paths', async (t) => {
   const directory = temporaryWorkspace(t);
-  const invalidDatabase = path.join(directory, 'invalid.sqlite');
   const invalidOutput = path.join(directory, 'invalid.json');
-  createLegacyDatabase(invalidDatabase, { invalidHashAt: 3 });
-  assert.throws(
-    () => exportAuth0Users({ dbPath: invalidDatabase, outputPath: invalidOutput }),
+  const invalidDb = freshDb();
+  await createLegacyUsers(invalidDb, { invalidHashAt: 3 });
+  await assert.rejects(
+    () => exportAuth0Users({ db: invalidDb, outputPath: invalidOutput }),
     (error) => assertSafetyCode(error, 'LEGACY_HASH_INVALID'),
   );
   assert.equal(fs.existsSync(invalidOutput), false);
 
-  const collisionDatabase = path.join(directory, 'collision.sqlite');
   const collisionOutput = path.join(directory, 'collision.json');
-  createLegacyDatabase(collisionDatabase, { duplicateUsername: true });
-  assert.throws(
-    () => exportAuth0Users({ dbPath: collisionDatabase, outputPath: collisionOutput }),
+  const collisionDb = freshDb();
+  await createLegacyUsers(collisionDb, { duplicateUsername: true });
+  await assert.rejects(
+    () => exportAuth0Users({ db: collisionDb, outputPath: collisionOutput }),
     (error) => assertSafetyCode(error, 'IMPORT_USERNAME_COLLISION'),
   );
   assert.equal(fs.existsSync(collisionOutput), false);
 
-  const validDatabase = path.join(directory, 'valid.sqlite');
-  createLegacyDatabase(validDatabase);
+  const validDb = freshDb();
+  await createLegacyUsers(validDb);
   const insideRepository = path.resolve(__dirname, 'must-not-be-written.json');
-  assert.throws(
-    () => exportAuth0Users({ dbPath: validDatabase, outputPath: insideRepository }),
+  await assert.rejects(
+    () => exportAuth0Users({ db: validDb, outputPath: insideRepository }),
     (error) => assertSafetyCode(error, 'PATH_INSIDE_REPOSITORY'),
   );
   assert.equal(fs.existsSync(insideRepository), false);
 });
 
-test('the export CLI never prints usernames, salts, or hashes to stdout', (t) => {
+test('the export CLI never prints usernames, salts, or hashes to stdout', async (t) => {
   const directory = temporaryWorkspace(t);
-  const databasePath = path.join(directory, 'legacy.sqlite');
   const outputPath = path.join(directory, 'auth0-import.json');
-  createLegacyDatabase(databasePath);
+  const db = freshDb();
+  await createLegacyUsers(db);
   const result = spawnSync(
     process.execPath,
     [
       path.resolve(__dirname, '../scripts/export-auth0-users.js'),
-      '--db',
-      databasePath,
+      '--uri',
+      mongod.getUri(),
+      '--db-name',
+      db.databaseName,
       '--output',
       outputPath,
     ],
@@ -198,24 +207,24 @@ test('import-file verification refuses extra fields and altered password paramet
   );
 });
 
-test('backfill dry-run is read-only; apply backs up then atomically links exactly five users', async (t) => {
+test('backfill dry-run is read-only; apply backs up then links exactly five users', async (t) => {
   const directory = temporaryWorkspace(t);
-  const databasePath = path.join(directory, 'legacy.sqlite');
   const importPath = path.join(directory, 'auth0-import.json');
-  const backupPath = path.join(directory, 'legacy-before-auth0.sqlite');
-  createLegacyDatabase(databasePath);
-  exportAuth0Users({ dbPath: databasePath, outputPath: importPath });
+  const backupPath = path.join(directory, 'legacy-before-auth0.json');
+  const db = freshDb();
+  await createLegacyUsers(db);
+  await exportAuth0Users({ db, outputPath: importPath });
 
   assert.deepEqual(
-    await backfillAuth0Subjects({ dbPath: databasePath, importPath, dryRun: true }),
+    await backfillAuth0Subjects({ db, importPath, dryRun: true }),
     { mode: 'dry-run', count: 5 },
   );
-  assert.equal(readColumns(databasePath).includes('auth0_sub'), false);
+  assert.equal(await linkedSubjectCount(db), 0);
   assert.equal(fs.existsSync(backupPath), false);
 
   await assert.rejects(
     () => backfillAuth0Subjects({
-      dbPath: databasePath,
+      db,
       importPath,
       backupPath,
       importJobId: 'job_completed123',
@@ -224,11 +233,11 @@ test('backfill dry-run is read-only; apply backs up then atomically links exactl
     }),
     (error) => assertSafetyCode(error, 'IMPORT_SUCCESS_COUNT_MISMATCH'),
   );
-  assert.equal(readColumns(databasePath).includes('auth0_sub'), false);
+  assert.equal(await linkedSubjectCount(db), 0);
   assert.equal(fs.existsSync(backupPath), false);
 
   const result = await backfillAuth0Subjects({
-    dbPath: databasePath,
+    db,
     importPath,
     backupPath,
     importJobId: 'job_completed123',
@@ -240,51 +249,49 @@ test('backfill dry-run is read-only; apply backs up then atomically links exactl
   assert.equal(result.backup, backupPath);
   assert.equal(fs.existsSync(backupPath), true);
 
-  const db = new Database(databasePath, { readonly: true });
-  try {
-    assert.deepEqual(
-      db.prepare('SELECT id, auth0_sub FROM users ORDER BY id').all(),
-      Array.from({ length: 5 }, (_, offset) => ({
-        id: offset + 1,
-        auth0_sub: `auth0|tomoyard-${offset + 1}`,
-      })),
-    );
-    const index = db.prepare('PRAGMA index_list(users)').all()
-      .find((entry) => entry.name === 'users_auth0_sub_unique');
-    assert.equal(index.unique, 1);
-    assert.equal(index.partial, 1);
-  } finally {
-    db.close();
-  }
+  const linked = await db.collection('users')
+    .find({}, { projection: { auth0_sub: 1 } })
+    .sort({ _id: 1 })
+    .toArray();
+  assert.deepEqual(
+    linked.map((row) => ({ id: row._id, auth0_sub: row.auth0_sub })),
+    Array.from({ length: 5 }, (_, offset) => ({
+      id: offset + 1,
+      auth0_sub: `auth0|tomoyard-${offset + 1}`,
+    })),
+  );
+  const index = (await db.collection('users').indexes())
+    .find((entry) => entry.name === 'users_auth0_sub_unique');
+  assert.equal(index.unique, true);
+  assert.ok(index.partialFilterExpression);
 
-  const backup = new Database(backupPath, { readonly: true });
-  try {
-    assert.equal(backup.pragma('quick_check', { simple: true }), 'ok');
-    assert.equal(backup.prepare('PRAGMA table_info(users)').all().some((column) => column.name === 'auth0_sub'), false);
-  } finally {
-    backup.close();
-  }
+  // The backup snapshots the pre-link documents.
+  const backup = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
+  assert.equal(backup.collection, 'users');
+  assert.equal(backup.documents.length, 5);
+  assert.ok(backup.documents.every((document) => document.auth0_sub === null));
 
   assert.deepEqual(
-    await backfillAuth0Subjects({ dbPath: databasePath, importPath, verify: true }),
+    await backfillAuth0Subjects({ db, importPath, verify: true }),
     { mode: 'verify', count: 5 },
   );
 });
 
 test('backfill refuses a pre-linked target before creating a backup', async (t) => {
   const directory = temporaryWorkspace(t);
-  const databasePath = path.join(directory, 'legacy.sqlite');
   const importPath = path.join(directory, 'auth0-import.json');
-  const backupPath = path.join(directory, 'should-not-exist.sqlite');
-  createLegacyDatabase(databasePath, { includeAuth0Subject: true });
-  exportAuth0Users({ dbPath: databasePath, outputPath: importPath });
-  const db = new Database(databasePath);
-  db.prepare('UPDATE users SET auth0_sub = ? WHERE id = 1').run('auth0|some-other-subject');
-  db.close();
+  const backupPath = path.join(directory, 'should-not-exist.json');
+  const db = freshDb();
+  await createLegacyUsers(db);
+  await exportAuth0Users({ db, outputPath: importPath });
+  await db.collection('users').updateOne(
+    { _id: 1 },
+    { $set: { auth0_sub: 'auth0|some-other-subject' } },
+  );
 
   await assert.rejects(
     () => backfillAuth0Subjects({
-      dbPath: databasePath,
+      db,
       importPath,
       backupPath,
       importJobId: 'job_completed123',
@@ -296,20 +303,19 @@ test('backfill refuses a pre-linked target before creating a backup', async (t) 
   assert.equal(fs.existsSync(backupPath), false);
 });
 
-test('backfill rolls back all row/schema changes when the named index is unsafe', async (t) => {
+test('backfill links no users when the named index is unsafe', async (t) => {
   const directory = temporaryWorkspace(t);
-  const databasePath = path.join(directory, 'legacy.sqlite');
   const importPath = path.join(directory, 'auth0-import.json');
-  const backupPath = path.join(directory, 'pre-attempt.sqlite');
-  createLegacyDatabase(databasePath, { includeAuth0Subject: true });
-  exportAuth0Users({ dbPath: databasePath, outputPath: importPath });
-  const before = new Database(databasePath);
-  before.exec('CREATE INDEX users_auth0_sub_unique ON users(auth0_sub)');
-  before.close();
+  const backupPath = path.join(directory, 'pre-attempt.json');
+  const db = freshDb();
+  await createLegacyUsers(db);
+  await exportAuth0Users({ db, outputPath: importPath });
+  // Same name, but neither unique nor partial: must never be trusted.
+  await db.collection('users').createIndex({ auth0_sub: 1 }, { name: 'users_auth0_sub_unique' });
 
   await assert.rejects(
     () => backfillAuth0Subjects({
-      dbPath: databasePath,
+      db,
       importPath,
       backupPath,
       importJobId: 'job_completed123',
@@ -318,16 +324,13 @@ test('backfill rolls back all row/schema changes when the named index is unsafe'
     }),
     (error) => assertSafetyCode(error, 'AUTH0_INDEX_INVALID'),
   );
+  // The backup is written before the index inspection, mirroring the old
+  // backup-then-transaction ordering; no user may have been linked.
   assert.equal(fs.existsSync(backupPath), true);
+  assert.equal(await linkedSubjectCount(db), 0);
 
-  const after = new Database(databasePath, { readonly: true });
-  try {
-    assert.equal(after.prepare('SELECT COUNT(*) AS count FROM users WHERE auth0_sub IS NOT NULL').get().count, 0);
-    const index = after.prepare('PRAGMA index_list(users)').all()
-      .find((entry) => entry.name === 'users_auth0_sub_unique');
-    assert.equal(index.unique, 0);
-    assert.equal(index.partial, 0);
-  } finally {
-    after.close();
-  }
+  const index = (await db.collection('users').indexes())
+    .find((entry) => entry.name === 'users_auth0_sub_unique');
+  assert.notEqual(index.unique, true);
+  assert.equal(index.partialFilterExpression, undefined);
 });

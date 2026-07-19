@@ -48,6 +48,17 @@ variable "mongodb_db_name" {
   }
 }
 
+variable "app_mongodb_db_name" {
+  description = "MongoDB Atlas database containing the main Tomo Yard social data (users, friends, hangouts)."
+  type        = string
+  default     = "tomoyard"
+
+  validation {
+    condition     = length(trimspace(var.app_mongodb_db_name)) > 0
+    error_message = "app_mongodb_db_name must not be empty."
+  }
+}
+
 variable "auth0_issuer_base_url" {
   description = "Auth0 tenant issuer URL, for example https://tenant.eu.auth0.com."
   type        = string
@@ -128,6 +139,11 @@ resource "azurerm_linux_web_app" "app" {
   service_plan_id     = azurerm_service_plan.plan.id
   https_only          = true
 
+  # Resolves its own Key Vault reference (mongodb-uri-app) at runtime.
+  identity {
+    type = "SystemAssigned"
+  }
+
   site_config {
     always_on          = true
     websockets_enabled = true
@@ -141,18 +157,23 @@ resource "azurerm_linux_web_app" "app" {
   app_settings = merge({
     # Oryx runs `npm install` on the App Service after zip deploy.
     SCM_DO_BUILD_DURING_DEPLOYMENT = "true"
-    # Keep SQLite + uploads + APK outside wwwroot so deploys don't wipe them.
-    DATA_DIR = "/home/data"
-    # /home is an Azure Files (CIFS) mount where SQLite WAL mode cannot work.
-    SQLITE_JOURNAL               = "delete"
+    # Keep uploads + APK + exported web bundle outside wwwroot so deploys
+    # don't wipe them. Durable application data lives in MongoDB Atlas.
+    DATA_DIR                     = "/home/data"
     WEBSITE_NODE_DEFAULT_VERSION = "~22"
     # Auth0 validates API access on the main server. Legacy tokens stay off by
     # default and can only be re-enabled through an explicit Terraform input.
     AUTH0_ISSUER_BASE_URL = var.auth0_issuer_base_url
     AUTH0_AUDIENCE        = var.auth0_audience
     ALLOW_LEGACY_AUTH     = tostring(var.allow_legacy_auth)
-    # The main server has no Unifold or Atlas credentials. It can only call the
-    # separately isolated crypto API with this generated service credential.
+    # Social data (users/friends/hangouts) lives in its own Atlas database with
+    # its own least-privilege database user; the secret value is managed
+    # outside Terraform, like every other Key Vault secret here.
+    MONGODB_URI     = "@Microsoft.KeyVault(VaultName=${data.azurerm_key_vault.crypto.name};SecretName=mongodb-uri-app)"
+    MONGODB_DB_NAME = var.app_mongodb_db_name
+    # The main server still has no Unifold credential and no crypto-ledger
+    # database access. It can only call the separately isolated crypto API
+    # with this generated service credential.
     CRYPTO_SERVICE_TOKEN = random_password.crypto_service_token.result
     }, var.crypto_enabled ? {
     # Deliberately absent on the first apply: the main server treats an unset
@@ -220,8 +241,16 @@ resource "azurerm_linux_web_app" "crypto" {
   }
 }
 
-# The crypto app resolves Key Vault references through its own managed identity.
-# No human or Terraform principal is granted access by this assignment.
+# Each app resolves Key Vault references through its own managed identity.
+# No human or Terraform principal is granted access by these assignments.
+resource "azurerm_role_assignment" "app_key_vault_secrets_user" {
+  scope                            = data.azurerm_key_vault.crypto.id
+  role_definition_name             = "Key Vault Secrets User"
+  principal_id                     = azurerm_linux_web_app.app.identity[0].principal_id
+  principal_type                   = "ServicePrincipal"
+  skip_service_principal_aad_check = true
+}
+
 resource "azurerm_role_assignment" "crypto_key_vault_secrets_user" {
   scope                            = data.azurerm_key_vault.crypto.id
   role_definition_name             = "Key Vault Secrets User"
@@ -332,4 +361,9 @@ output "crypto_service_url" {
 output "crypto_possible_outbound_ip_addresses" {
   description = "Allow-list these App Service egress IPs in MongoDB Atlas."
   value       = azurerm_linux_web_app.crypto.possible_outbound_ip_address_list
+}
+
+output "app_possible_outbound_ip_addresses" {
+  description = "Main-app egress IPs for the Atlas allow-list (same shared plan as the crypto app, so usually identical)."
+  value       = azurerm_linux_web_app.app.possible_outbound_ip_address_list
 }

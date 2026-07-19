@@ -9,7 +9,6 @@ const { after, before, test } = require('node:test');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tomoyard-crypto-routes-'));
 process.env.DATA_DIR = dataDir;
-process.env.SQLITE_JOURNAL = 'delete';
 process.env.ALLOW_LEGACY_AUTH = 'true';
 process.env.AUTH0_ISSUER_BASE_URL = 'https://test.us.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.tomoyard.invalid';
@@ -158,11 +157,15 @@ require.cache[cryptoPath] = {
   exports: fakeCrypto,
 };
 
-const { app, db } = require('../index');
+const { startTestMongo } = require('../test-helpers/mongo');
+const { app, init, closeDb, store } = require('../index');
+let mongod;
 let server;
 let baseUrl;
 
 before(async () => {
+  mongod = await startTestMongo();
+  await init();
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -170,7 +173,8 @@ before(async () => {
 
 after(async () => {
   if (server) await new Promise((resolve) => server.close(resolve));
-  db.close();
+  await closeDb();
+  if (mongod) await mongod.stop();
   fs.rmSync(dataDir, { recursive: true, force: true });
   delete require.cache[cryptoPath];
 });
@@ -204,6 +208,10 @@ async function register(username) {
   return result.json.token;
 }
 
+async function hangoutDoc(hangoutId) {
+  return store.hangouts.findOne({ _id: hangoutId });
+}
+
 test('money routes preserve intent, repair retries, and mirror settlement atomically', async () => {
   const alice = await register('alice');
   const bob = await register('bob');
@@ -234,7 +242,7 @@ test('money routes preserve intent, repair retries, and mirror settlement atomic
   });
   assert.equal(unavailable.status, 503);
   assert.equal(unavailable.json.error, 'crypto_unavailable');
-  assert.equal(db.prepare('SELECT COUNT(*) count FROM hangouts').get().count, 0);
+  assert.equal(await store.hangouts.countDocuments(), 0);
   state.ready = true;
 
   const created = await request('/hangouts', { method: 'POST', token: alice, body: createBody });
@@ -243,7 +251,7 @@ test('money routes preserve intent, repair retries, and mirror settlement atomic
   assert.equal(created.json.hangout.stake.iStaked, false, 'host is not debited before local durability');
   assert.equal(state.event.rsvps.length, 0);
 
-  // Simulate a remote RSVP whose HTTP response was lost before SQLite mirror.
+  // Simulate a remote RSVP whose HTTP response was lost before the local mirror.
   state.event.rsvps.push({ userId: 'ty_alice', status: 'staked', stakedUnits: '2000000' });
   const repaired = await request(`/hangouts/${hangoutId}/stake`, { method: 'POST', token: alice });
   assert.equal(repaired.status, 200);
@@ -283,21 +291,15 @@ test('money routes preserve intent, repair retries, and mirror settlement atomic
   state.settlementMode = 'invalid';
   const invalidSettlement = await request(`/hangouts/${hangoutId}/end`, { method: 'POST', token: alice });
   assert.equal(invalidSettlement.status, 502);
-  assert.equal(db.prepare('SELECT settled_at FROM hangouts WHERE id = ?').get(hangoutId).settled_at, null);
-  assert.equal(
-    db.prepare('SELECT COUNT(*) count FROM hangout_settlements WHERE hangout_id = ?').get(hangoutId).count,
-    0,
-  );
+  assert.equal((await hangoutDoc(hangoutId)).settled_at, null);
+  assert.equal((await hangoutDoc(hangoutId)).settlements.length, 0);
 
   state.settlementMode = 'valid';
   const settled = await request(`/hangouts/${hangoutId}/end`, { method: 'POST', token: alice });
   assert.equal(settled.status, 200);
   assert.equal(settled.json.hangout.stake.settled, true);
   assert.ok(settled.json.hangout.completedAt);
-  assert.equal(
-    db.prepare('SELECT COUNT(*) count FROM hangout_settlements WHERE hangout_id = ?').get(hangoutId).count,
-    2,
-  );
+  assert.equal((await hangoutDoc(hangoutId)).settlements.length, 2);
   const settledAgain = await request(`/hangouts/${hangoutId}/end`, { method: 'POST', token: alice });
   assert.equal(settledAgain.status, 200);
 
@@ -374,7 +376,7 @@ test('a bonus-day staked hangout stakes at 1x USDC while acorns keep the 2x', as
   const hangoutId = created.json.hangout.id;
   assert.equal(state.createEventOpts.multiplierBps, 10000);
   // The 2x is still stored locally; it drives acorns/vibe and the UI label.
-  const stored = db.prepare('SELECT bonus_mult, bonus_reason FROM hangouts WHERE id = ?').get(hangoutId);
+  const stored = await hangoutDoc(hangoutId);
   assert.equal(stored.bonus_mult, 2);
   assert.equal(stored.bonus_reason, 'Valentines');
 
@@ -402,9 +404,8 @@ test('a bonus-day staked hangout stakes at 1x USDC while acorns keep the 2x', as
   const settled = await request(`/hangouts/${hangoutId}/end`, { method: 'POST', token: carol });
   assert.equal(settled.status, 200);
   assert.equal(settled.json.hangout.stake.settled, true);
-  const payouts = db.prepare(
-    'SELECT payout_units FROM hangout_settlements WHERE hangout_id = ?').all(hangoutId);
-  assert.deepEqual(payouts.map((row) => row.payout_units), ['2000000', '2000000']);
+  const payouts = (await hangoutDoc(hangoutId)).settlements.map((row) => row.payout_units);
+  assert.deepEqual(payouts, ['2000000', '2000000']);
 });
 
 test('the wallet reports disabled without custody and passes custody fields through', async () => {

@@ -37,7 +37,8 @@ assets before commercial use.
 - APK download: <https://ht6.icinoxis.net/apk>
 - Main Azure App Service: `ht6-tomoyard`
 - Crypto Azure App Service: `ht6-tomoyard-crypto`
-- Atlas database: `ht6_crypto` on the dedicated `tomo-yard` cluster
+- Atlas databases on the dedicated `tomo-yard` cluster: `tomoyard` (main social
+  data) and `ht6_crypto` (crypto ledger), each with its own least-privilege user
 
 Terraform in `infra/` manages Azure and Cloudflare. External crypto credentials
 live in Azure Key Vault `ht6tomoyardkv4831`; no secret value belongs in Terraform,
@@ -65,9 +66,10 @@ keystore because APK updates must keep the same signature. The four
 
 ## Run locally
 
-Main API:
+Main API (needs a MongoDB; tests bring their own in-memory instance):
 
 ```bash
+docker run -d -p 27017:27017 mongo:7   # or any MongoDB at MONGODB_URI
 cd server
 npm install
 npm test

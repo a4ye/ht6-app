@@ -72,7 +72,7 @@ Two currencies, do not confuse them:
    `src/screens/NewHangoutScreen.tsx`; API client in `src/api.ts`; money helpers in
    `src/money.ts`; types in `src/types.ts`.
 
-2. **Main server** — `server/index.js` (Express + better-sqlite3). Owns hangouts, friends,
+2. **Main server** — `server/index.js` (Express + MongoDB). Owns hangouts, friends,
    NFC confirm, and the `/wallet/*` + `/hangouts/:id/{stake,settle,end,confirm}` endpoints.
    It never holds the Unifold key; it proxies money operations through
    `server/crypto.js` to the custody service, using a `CRYPTO_SERVICE_TOKEN` bearer and
@@ -243,8 +243,9 @@ accepted."
 ## 6. Verification protocol (do this per fix, not just at the end)
 
 - **Run it.** Prefer the repo's `/run` and `/verify` skills if available. Otherwise:
-  - Main server: `cd server && npm install && node index.js` (listens on `:4000`, SQLite in
-    `server/data/`).
+  - Main server: `cd server && npm install && node index.js` (listens on `:4000`; needs a
+    MongoDB at `MONGODB_URI`, default `mongodb://127.0.0.1:27017` — e.g.
+    `docker run -d -p 27017:27017 mongo:7`).
   - Custody service (for staking/wallet): `cd custody && npm install &&
     cp .env.example .env` then fill dev values and `npm start` (`:8787`). Point the main
     server's `CRYPTO_API_URL` at it and set a matching `CRYPTO_SERVICE_TOKEN` (≥32 chars).
