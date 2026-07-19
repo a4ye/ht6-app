@@ -85,7 +85,7 @@ export default function PhotoScreen({ hangoutId }: { hangoutId: number }) {
               ) : (
                 <View style={{ alignItems: 'center', padding: 16 }}>
                   <Text style={{ fontFamily: F.body, fontSize: 14, color: C.brown, textAlign: 'center', marginBottom: 10 }}>
-                    Tomo Yard needs the camera for hangout photos.
+                    Tomo Together needs the camera for hangout photos.
                   </Text>
                   <DoodleButton label="Allow camera" seed={3} onPress={() => requestPermission()} />
                 </View>

@@ -1,4 +1,4 @@
-// Tomo Yard server: accounts, friends, hangouts, vibe, wardrobe, leaderboard.
+// Tomo Together server: accounts, friends, hangouts, vibe, wardrobe, leaderboard.
 const express = require('express');
 const Database = require('better-sqlite3');
 const multer = require('multer');
@@ -1717,7 +1717,7 @@ app.use((error, _req, res, _next) => {
 
 if (require.main === module) {
   const server = createServer();
-  server.listen(PORT, () => console.log(`Tomo Yard server on :${PORT} (+ /ws world)`));
+  server.listen(PORT, () => console.log(`Tomo Together server on :${PORT} (+ /ws world)`));
 }
 
 module.exports = {

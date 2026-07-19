@@ -115,7 +115,7 @@ export default function OnboardingScreen() {
       >
         <View style={{ alignItems: 'center', marginBottom: 16 }}>
           <OutlinedText size={40} color={C.white} outline={C.brown} thickness={3}>
-            Tomo Yard
+            Tomo Together
           </OutlinedText>
           <Text style={{ fontFamily: F.body, fontSize: 15, color: C.brown, marginTop: 2 }}>
             Fill your yard with real hangouts

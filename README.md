@@ -1,4 +1,4 @@
-# Tomo Yard
+# Tomo Together
 
 A cozy pixel-art friends app: real accounts, real hangouts, and real proof you
 showed up. It ships as an Expo/React Native Android app and web build backed by a

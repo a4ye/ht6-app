@@ -68,10 +68,10 @@ function unavailableMessage(): string | null {
     return 'Auth0 is not configured for this build. Add the public Auth0 environment variables and rebuild.';
   }
   if (isExpoGo) {
-    return 'Auth0 needs a Tomo Yard development or production build; it is not available in Expo Go.';
+    return 'Auth0 needs a Tomo Together development or production build; it is not available in Expo Go.';
   }
   if (sdkLoadError || !auth0Sdk) {
-    return 'Auth0 needs a Tomo Yard development or production build; it is not available in Expo Go.';
+    return 'Auth0 needs a Tomo Together development or production build; it is not available in Expo Go.';
   }
   return null;
 }

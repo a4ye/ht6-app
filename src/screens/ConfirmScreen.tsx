@@ -180,7 +180,7 @@ export default function ConfirmScreen({
     diagLog(`ui: payload via ${src}, confirming with server...`);
     try {
       const parts = raw.split('|');
-      if (parts[0] !== 'TY1' || parts.length !== 4) throw new Error('That is not a Tomo Yard code');
+      if (parts[0] !== 'TY1' || parts.length !== 4) throw new Error('That is not a Tomo Together code');
       if (Number(parts[1]) !== hangoutId) throw new Error('That code is for a different hangout');
       if (parts[2] !== otherUsername) throw new Error(`That code belongs to @${parts[2]}, not @${otherUsername}`);
       const r = await api.confirm(hangoutId, parts[2], parts[3]);

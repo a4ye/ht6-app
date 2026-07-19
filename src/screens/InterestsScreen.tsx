@@ -47,7 +47,7 @@ export default function InterestsScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
         <DoodleCard seed={6}>
           <Text style={{ fontFamily: F.body, fontSize: 13.5, color: C.brown, marginBottom: 4 }}>
-            Tap the things you're into. They show on your profile, and Tomo Yard
+            Tap the things you're into. They show on your profile, and Tomo Together
             suggests these kinds of hangouts to you first.
           </Text>
           <Text style={{ fontFamily: F.display, fontSize: 12, color: C.labelGreen, marginBottom: 10 }}>

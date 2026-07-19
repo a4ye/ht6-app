@@ -1,4 +1,4 @@
-// Renders the Tomo Yard avatar sprites from hand-authored 20x20 ASCII pixel
+// Renders the Tomo Together avatar sprites from hand-authored 20x20 ASCII pixel
 // maps into 480x480 RGBA PNGs (24x nearest-neighbor upscale). Self-contained:
 // a minimal PNG writer lives at the bottom, so no ImageMagick is needed.
 //   node tools/generate-avatars.js

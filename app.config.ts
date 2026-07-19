@@ -23,7 +23,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
-    name: config.name ?? 'Tomo Yard',
+    name: config.name ?? 'Tomo Together',
     slug: config.slug ?? 'friends-thing',
     scheme: AUTH0_SCHEME,
     ios: {

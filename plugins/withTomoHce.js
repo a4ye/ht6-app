@@ -564,8 +564,8 @@ function withTomoHceStrings(config) {
   return withStringsXml(config, (config) => {
     config.modResults = AndroidConfig.Strings.setStringItem(
       [
-        { $: { name: 'hce_service_desc' }, _: 'Tomo Yard tap sharing' },
-        { $: { name: 'hce_aid_group_desc' }, _: 'Tomo Yard' },
+        { $: { name: 'hce_service_desc' }, _: 'Tomo Together tap sharing' },
+        { $: { name: 'hce_aid_group_desc' }, _: 'Tomo Together' },
       ],
       config.modResults
     );

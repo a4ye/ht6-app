@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Tomo Yard",
+    "name": "Tomo Together",
     "slug": "friends-thing",
     "scheme": "tomoyard",
     "version": "1.0.0",
@@ -38,7 +38,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Tomo Yard uses the camera for your memory polaroids."
+          "cameraPermission": "Tomo Together uses the camera for your memory polaroids."
         }
       ]
     ]

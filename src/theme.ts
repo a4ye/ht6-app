@@ -1,4 +1,4 @@
-// Tomo Yard — Neko Atsume-inspired hand-drawn theme.
+// Tomo Together — Neko Atsume-inspired hand-drawn theme.
 // Warm tan paw-print world, cream cards, chunky brown-outlined lettering.
 
 export const C = {

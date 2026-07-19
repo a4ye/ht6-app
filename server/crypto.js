@@ -1,6 +1,6 @@
 'use strict';
 
-// Thin, authenticated proxy from the Tomo Yard API to the treasury-custody
+// Thin, authenticated proxy from the Tomo Together API to the treasury-custody
 // service. The Unifold and Atlas credentials never cross this boundary.
 
 const HEALTH_TIMEOUT_MS = 2_000;
