@@ -93,11 +93,12 @@ function unitsSetting(name: string, fallback: string, positive = false): string 
 export const CREDIT_LIMIT_UNITS = unitsSetting('CREDIT_LIMIT_UNITS', '0'); // floor at 0 (no debt)
 export const CASHOUT_THRESHOLD_UNITS = unitsSetting(
   'CASHOUT_THRESHOLD_UNITS',
-  '1000000',
+  '3000000',
   true,
-); // cash out once you're owed $1+ (lowered from $20 for the demo; override via env)
+); // cash out once you're owed $3+ (Unifold rejects outbound transfers below ~$3; override via env)
 // Validation and the wallet's ready flag intentionally share one configurable
-// product minimum. Unifold's lower network floor does not bypass our batching.
+// product minimum. This must stay at/above Unifold's outbound-transfer floor so
+// a user can never submit a withdrawal that the provider will reject.
 export const MIN_WITHDRAW_UNITS = CASHOUT_THRESHOLD_UNITS;
 
 // Base mainnet chain id.
