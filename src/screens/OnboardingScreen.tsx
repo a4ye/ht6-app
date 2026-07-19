@@ -179,7 +179,7 @@ export default function OnboardingScreen() {
           <Label>Server</Label>
           <TextInput
             value={serverUrl} onChangeText={setServerUrl} autoCapitalize="none"
-            placeholder="http://your-server:4000" placeholderTextColor={C.fadedInk}
+            placeholder="https://ht6.icinoxis.net" placeholderTextColor={C.fadedInk}
             style={inputStyle}
           />
 
