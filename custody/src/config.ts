@@ -93,9 +93,9 @@ function unitsSetting(name: string, fallback: string, positive = false): string 
 export const CREDIT_LIMIT_UNITS = unitsSetting('CREDIT_LIMIT_UNITS', '0'); // floor at 0 (no debt)
 export const CASHOUT_THRESHOLD_UNITS = unitsSetting(
   'CASHOUT_THRESHOLD_UNITS',
-  '20000000',
+  '1000000',
   true,
-); // cash out once you're owed $20+
+); // cash out once you're owed $1+ (lowered from $20 for the demo; override via env)
 // Validation and the wallet's ready flag intentionally share one configurable
 // product minimum. Unifold's lower network floor does not bypass our batching.
 export const MIN_WITHDRAW_UNITS = CASHOUT_THRESHOLD_UNITS;

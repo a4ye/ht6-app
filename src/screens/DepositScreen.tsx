@@ -99,16 +99,17 @@ export default function DepositScreen() {
     setWalletBusy(true); setWalletMsg(null);
     try {
       const r = await api.addFunds();
-      // Unifold returns one deposit address per supported source chain with no
-      // guaranteed order. Pick the primary/EVM one — never blindly [0], which can
-      // be a non-Base (e.g. Solana) address that a Base send would strand. Do NOT
-      // fall back to treasuryAddress: it is not a monitored deposit wallet.
+      // Unifold returns one deposit address per supported source chain, with no
+      // guaranteed order. The user is sending USDC ON BASE, so pick the EVM
+      // address (chain_type 'ethereum' — the same 0x wallet receives on any EVM
+      // source chain, Base included). is_primary is only the tuple's primary
+      // wallet on SOME source chain (it can be e.g. a Solana address), so it is
+      // not a safe key for a Base send. Never fall back to a non-EVM address or
+      // to treasuryAddress — a Base transfer there would be stranded.
       const list = r.depositAddresses as
-        { address?: string; chain_type?: string; is_primary?: boolean }[] | undefined;
+        { address?: string; chain_type?: string }[] | undefined;
       const addr =
-        list?.find((a) => a.is_primary && typeof a.address === 'string')?.address
-        ?? list?.find((a) => a.chain_type === 'ethereum' && typeof a.address === 'string')?.address
-        ?? list?.find((a) => typeof a.address === 'string')?.address
+        list?.find((a) => a.chain_type === 'ethereum' && typeof a.address === 'string')?.address
         ?? null;
       setDepositAddr(addr);
     } catch (e) {
