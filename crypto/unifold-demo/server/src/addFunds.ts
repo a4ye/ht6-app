@@ -1,46 +1,46 @@
 // One-time "add funds" (deposit) flow. Creates per-user Unifold deposit addresses
 // that route incoming crypto into the project treasury, tagged with external_user_id.
-// A webhook would then credit the user's balance on arrival.
-//
-// NOTE: wired against the real Unifold deposit-addresses endpoint but NOT tested —
-// it's the "add funds is supported but doesn't have to be tested" path. Uses a raw
-// fetch so it compiles regardless of the SDK's exact method surface.
+// The webhook (or the /deposits/refresh poll) then credits the user's balance on
+// arrival.
+import type { DepositAddress } from '@unifold/node';
 import {
-  UNIFOLD_SECRET_KEY,
   TREASURY_ACCOUNT_ID,
   CHAIN_ID,
   USDC_BASE_TOKEN_ADDRESS,
 } from './config.js';
 import { unifold } from './unifold.js';
 
-// Native Circle USDC on Base — the token deposits are converted into.
 export async function addFunds(externalUserId: string): Promise<{
   treasuryAddress: string;
-  depositAddresses: unknown;
+  depositAddresses: DepositAddress[];
 }> {
   // Deposits should land in the treasury (where the grant pool lives).
   const acct = await unifold.treasury.accounts.retrieve(TREASURY_ACCOUNT_ID);
 
-  const res = await fetch('https://api.unifold.io/v1/deposit_addresses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${UNIFOLD_SECRET_KEY}`,
-    },
-    body: JSON.stringify({
+  // Alignment contract with ownedDeposit() in deposits.ts: the addresses are
+  // provisioned with destination_chain_type 'ethereum', destination_chain_id
+  // String(CHAIN_ID), destination_token_address USDC_BASE_TOKEN_ADDRESS (native
+  // Circle USDC on Base — the token deposits are converted into), and
+  // recipient_address == treasury.address — the exact tuple ownedDeposit()
+  // checks — so an arrived deposit credits the user via the webhook or the
+  // /deposits/refresh poll.
+  try {
+    // Response<DepositAddressList> merges the payload onto the result (same
+    // convention as `acct.address` above and `page.data` in deposits.ts), so
+    // `.data` is the DepositAddress[] — one address per supported source chain.
+    const created = await unifold.depositAddresses.create({
       external_user_id: externalUserId,
       destination_chain_type: 'ethereum',
       destination_chain_id: String(CHAIN_ID),
       destination_token_address: USDC_BASE_TOKEN_ADDRESS,
       recipient_address: acct.address,
       action_type: 'deposit',
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`deposit_addresses ${res.status}: ${await res.text().catch(() => '')}`);
+    });
+    return { treasuryAddress: acct.address, depositAddresses: created.data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Unifold deposit-address provisioning failed for user ${externalUserId}: ${message}`,
+    );
   }
-
-  const data = (await res.json()) as { data?: unknown };
-  return { treasuryAddress: acct.address, depositAddresses: data.data ?? data };
 }
