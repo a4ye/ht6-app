@@ -77,7 +77,7 @@ node index.js
 Crypto service:
 
 ```bash
-cd crypto/unifold-demo/server
+cd custody
 npm install
 cp .env.example .env
 # Fill the local ignored file; use CRYPTO_STORE_BACKEND=json only for local development.

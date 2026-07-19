@@ -78,7 +78,7 @@ Two currencies, do not confuse them:
    `server/crypto.js` to the custody service, using a `CRYPTO_SERVICE_TOKEN` bearer and
    mapping each user to `external_user_id = ty_<username>`.
 
-3. **Custody service** — `crypto/unifold-demo/server/` (TypeScript). The only thing that
+3. **Custody service** — `custody/` (TypeScript). The only thing that
    talks to Unifold. Holds all USDC in **one treasury**; per-user balances are ledger
    claims (Mongo in prod via `mongoStore.ts`, in-memory/JSON via `runtimeStore.ts` in
    dev). Key files: `addFunds.ts`, `deposits.ts`, `withdraw.ts`, `webhooks.ts`,
@@ -245,7 +245,7 @@ accepted."
 - **Run it.** Prefer the repo's `/run` and `/verify` skills if available. Otherwise:
   - Main server: `cd server && npm install && node index.js` (listens on `:4000`, SQLite in
     `server/data/`).
-  - Custody service (for staking/wallet): `cd crypto/unifold-demo/server && npm install &&
+  - Custody service (for staking/wallet): `cd custody && npm install &&
     cp .env.example .env` then fill dev values and `npm start` (`:8787`). Point the main
     server's `CRYPTO_API_URL` at it and set a matching `CRYPTO_SERVICE_TOKEN` (≥32 chars).
   - App: default server is editable on the sign-in screen; point it at your local main
@@ -254,7 +254,7 @@ accepted."
   settle/end; or add-funds → refresh; or withdraw). Observe balances and settlement
   outcomes, don't just typecheck.
 - **Tests.** Run and extend: `server/crypto.test.js`, `server/test-crypto/*.integration.test.js`,
-  and `crypto/unifold-demo/server/test/*`. `tsc` must stay clean in the custody service.
+  and `custody/test/*`. `tsc` must stay clean in the custody service.
 - For client changes, follow `AGENTS.md` (Expo v57 docs) and confirm the screen renders /
   behaves in the app, not just that it compiles.
 

@@ -1,5 +1,5 @@
 {
-  "name": "unifold-demo-server",
+  "name": "custody-server",
   "version": "1.0.0",
   "private": true,
   "type": "module",
