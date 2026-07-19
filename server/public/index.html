@@ -41,7 +41,6 @@ body{
 img,svg{display:block}
 a{color:inherit;text-decoration:none}
 .px{image-rendering:pixelated}
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .scene{
   position:relative;
   min-height:100vh;
@@ -75,71 +74,6 @@ a{color:inherit;text-decoration:none}
   text-align:center;
   padding:0 5vw;
   z-index:6;
-}
-/* ============ giant wordmark footer ============ */
-.bigmark{
-  position:relative;
-  background:var(--tan);
-  border-top:5px solid var(--dark);
-  padding-top:34px;
-  overflow:clip;
-  text-align:center;
-  isolation:isolate;
-}
-.foot-links{
-  position:relative;z-index:3;
-  display:flex;flex-wrap:wrap;gap:10px 20px;
-  align-items:center;justify-content:center;
-  padding:0 5vw 20px;
-  font-size:clamp(.82rem,3.4vw,1rem);color:var(--ink);
-}
-.foot-links a{text-decoration:underline;text-underline-offset:3px}
-.foot-links a:hover{color:var(--orange)}
-.foot-links .dot{color:var(--faded)}
-.foot-credit{
-  position:relative;z-index:3;text-align:center;
-  color:var(--faded);font-size:clamp(.8rem,3.2vw,.95rem);
-  padding:0 5vw 22px;
-}
-/* faint acorn/leaf motif behind the mark */
-.mark-bg{
-  position:absolute;inset:0;z-index:0;opacity:.45;pointer-events:none;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cg fill='%23E4C480'%3E%3Cpath d='M45 28h6v24h-6z M36 37h24v6h-24z'/%3E%3Crect x='150' y='150' width='6' height='6'/%3E%3Crect x='120' y='40' width='6' height='6'/%3E%3C/g%3E%3C/svg%3E");
-}
-/* the giant name, its bottom clipped by the container edge */
-.mark{
-  position:relative;z-index:2;
-  font-family:"SproutPixel","Courier New",monospace;
-  font-weight:400;
-  line-height:.74;
-  letter-spacing:0;
-  user-select:none;
-}
-.mark span{
-  display:block;white-space:nowrap;
-  /* fills the width edge-to-edge; overflow:clip on .bigmark hides any hair past it */
-  font-size:clamp(2.6rem,18vw,14rem);
-  background:linear-gradient(180deg,#F4B657 0%,#E8A33D 52%,#F0C93F 100%);
-  background-size:100% 220%;
-  -webkit-background-clip:text;background-clip:text;
-  -webkit-text-fill-color:transparent;color:transparent;
-  filter:drop-shadow(4px 5px 0 rgba(74,64,49,.92));
-}
-/* clip a thin slice off the bottom of the last row against the page edge */
-.mark span:last-child{margin-bottom:-.08em}
-/* one line on wider screens ("TOMO YARD" side by side) */
-@media (min-width:720px){
-  .mark{display:flex;justify-content:center;align-items:flex-end;gap:.5em;
-    white-space:nowrap;margin-bottom:-.9vw}
-  .mark span{font-size:min(14.5vw,12rem)}
-  .mark span:last-child{margin-bottom:0}
-}
-@media (max-width:460px){
-  .foot-links{font-size:.78rem;gap:5px 11px;padding-bottom:16px}
-}
-@media (prefers-reduced-motion: no-preference){
-  .mark span{animation:markShine 6s ease-in-out infinite}
-  @keyframes markShine{0%,100%{background-position:0 0}50%{background-position:0 100%}}
 }
 /* ============ sprite buttons (9-slice) ============ */
 .pbtn{
@@ -420,6 +354,60 @@ a{color:inherit;text-decoration:none}
 .fh2{bottom:34svh;left:52%}
 .fh3{bottom:37svh;right:18%}
 .credit{position:absolute;bottom:1.6svh;left:0;right:0;text-align:center;font-size:.85rem;color:var(--ink);z-index:6}
+/* ============ continuity world (enabled only when JS+GSAP run) ============ */
+#world,#trav,#wflash,.wshut{display:none}
+.wld #world,.wld #trav{display:block}
+.wld #wflash,.wld .wshut{display:block}
+#world{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.wsky{position:absolute;inset:0}
+.wtint{position:absolute;inset:0;opacity:0}
+#tint-noon{background-color:#F1CE8F;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cg fill='%23E0B872'%3E%3Cpath d='M45 28h6v24h-6z M36 37h24v6h-24z' opacity='.6'/%3E%3Cpath d='M168 152h4v16h-4z M162 158h16v4h-16z' opacity='.5'/%3E%3Crect x='128' y='58' width='6' height='6' opacity='.55'/%3E%3Crect x='60' y='182' width='6' height='6' opacity='.5'/%3E%3C/g%3E%3C/svg%3E")}
+#tint-gold{background-color:#EFC983;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cg fill='%23DCAE63'%3E%3Cpath d='M45 28h6v24h-6z M36 37h24v6h-24z' opacity='.6'/%3E%3Cpath d='M168 152h4v16h-4z M162 158h16v4h-16z' opacity='.5'/%3E%3Crect x='128' y='58' width='6' height='6' opacity='.55'/%3E%3Crect x='60' y='182' width='6' height='6' opacity='.5'/%3E%3C/g%3E%3C/svg%3E")}
+#wset{position:absolute;inset:0;display:flex;flex-direction:column}
+#wset i{display:block;flex:1 1 12.5%}
+#wsun{position:absolute;top:0;left:0;width:clamp(100px,15vw,160px)}
+.wcl{position:absolute;top:0;left:0}
+.wstar{position:absolute;width:11px;color:#fff;visibility:hidden}
+#wband{position:fixed;left:-20px;right:-20px;bottom:-28px;height:calc(24svh + 28px);border:32px solid transparent;border-image:url('px/world/grass.png') 80 fill round;image-rendering:pixelated;z-index:0;pointer-events:none;display:none}
+.wld #wband{display:block}
+.wfen{position:absolute;top:-40px;height:58px;width:52%;background:url('px/world/fenceH.png') repeat-x bottom / auto 100%;image-rendering:pixelated}
+#wfenL{left:-30px}
+#wfenR{right:-30px}
+#trav{position:fixed;inset:0;z-index:20;pointer-events:none}
+#wcat{position:absolute;left:0;bottom:0;width:104px;aspect-ratio:352/440;transform-origin:50% 100%}
+#wcat .cin{position:absolute;inset:0}
+#wcat img{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated}
+#wbfly{position:absolute;top:0;left:0;width:34px}
+#wpol{position:absolute;top:0;left:0;width:150px;background:var(--white);border:3px solid var(--dark);border-radius:6px;padding:6px;opacity:0;visibility:hidden}
+#wpol .pwell{background:var(--tan)}
+#wpol .pcap{height:20px;font-size:11px}
+.wpg{position:absolute;left:-8px;right:-8px;bottom:-10px;height:40%;border:12px solid transparent;border-image:url('px/world/grass.png') 80 fill round;image-rendering:pixelated}
+.wpa{position:absolute;aspect-ratio:352/440}
+.wpa img{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated}
+#wpol .devcov{opacity:1}
+.waud{position:absolute;left:0;bottom:0;width:46px;aspect-ratio:352/440;opacity:0;visibility:hidden}
+.waud img{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated}
+.waud.flip img{transform:scaleX(-1)}
+#wclA{left:56vw;top:16svh}
+#wclB{left:6vw;top:26svh}
+#wflash{position:fixed;inset:0;background:#fff;z-index:60;opacity:0;pointer-events:none}
+.wshut{position:fixed;background:var(--cream);z-index:50;pointer-events:none}
+#shT{left:0;right:0;top:0;height:51vh;transform-origin:50% 0;transform:scaleY(0)}
+#shB{left:0;right:0;bottom:0;height:51vh;transform-origin:50% 100%;transform:scaleY(0)}
+#shL{top:0;bottom:0;left:0;width:51vw;transform-origin:0 50%;transform:scaleX(0)}
+#shR{top:0;bottom:0;right:0;width:51vw;transform-origin:100% 50%;transform:scaleX(0)}
+#wcat .cin,#wpol,#wsun,#wband,.wfen,#wbfly{will-change:transform}
+/* scene handover overrides while the world layer is active */
+.wld .scene{background-color:transparent;background-image:none}
+.wld .ground{border-image-source:none}
+.wld .you-av,.wld .fr-you,.wld .fn1,.wld .hero-sun,.wld .fin-sun,.wld .sc-hero .cloud,.wld .sc-friends .cloud,.wld .c4,.wld .sc-hero .bfly,.wld .sc-finale .fence{display:none}
+.wld .sc-duel .spark{color:#DDB365}
+.wld .dcard{box-shadow:5px 6px 0 #CBA269}
+.hint-sprout{position:absolute;bottom:14px;left:50%;margin-left:-15px;width:30px;opacity:0;transform-origin:50% 100%}
+.roll-a{position:absolute;bottom:calc(10svh - 16px);width:26px;z-index:3;pointer-events:none}
+.ra1{left:28%}
+.ra2{left:38%;width:22px}
+.ring.r3{border-width:6px;border-radius:10px}
 /* ============ desktop ============ */
 @media (min-width:760px){
   .mem-grid{grid-template-columns:repeat(3,minmax(0,172px));gap:30px 26px}
@@ -433,9 +421,119 @@ a{color:inherit;text-decoration:none}
 @media (prefers-reduced-motion: reduce){
   .pbtn{transition:none}
 }
+/* ============ giant wordmark footer (preserved from teammate commit) ============ */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.bigmark{
+  position:relative;
+  /* sit above the fixed continuity backdrop (world/tints/travelers top out at
+     z-index 7) so the footer is visible on the animated page, like the scenes */
+  z-index:8;
+  background:var(--tan);
+  border-top:5px solid var(--dark);
+  padding-top:34px;
+  overflow:clip;
+  text-align:center;
+  isolation:isolate;
+}
+.foot-links{
+  position:relative;z-index:3;
+  display:flex;flex-wrap:wrap;gap:10px 20px;
+  align-items:center;justify-content:center;
+  padding:0 5vw 20px;
+  font-size:clamp(.82rem,3.4vw,1rem);color:var(--ink);
+}
+.foot-links a{text-decoration:underline;text-underline-offset:3px}
+.foot-links a:hover{color:var(--orange)}
+.foot-links .dot{color:var(--faded)}
+.foot-credit{
+  position:relative;z-index:3;text-align:center;
+  color:var(--faded);font-size:clamp(.8rem,3.2vw,.95rem);
+  padding:0 5vw 22px;
+}
+.mark-bg{
+  position:absolute;inset:0;z-index:0;opacity:.45;pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cg fill='%23E4C480'%3E%3Cpath d='M45 28h6v24h-6z M36 37h24v6h-24z'/%3E%3Crect x='150' y='150' width='6' height='6'/%3E%3Crect x='120' y='40' width='6' height='6'/%3E%3C/g%3E%3C/svg%3E");
+}
+.mark{
+  position:relative;z-index:2;
+  font-family:"SproutPixel","Courier New",monospace;
+  font-weight:400;
+  line-height:.74;
+  letter-spacing:0;
+  user-select:none;
+}
+.mark span{
+  display:block;white-space:nowrap;
+  font-size:clamp(2.6rem,18vw,14rem);
+  background:linear-gradient(180deg,#F4B657 0%,#E8A33D 52%,#F0C93F 100%);
+  background-size:100% 220%;
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+  filter:drop-shadow(4px 5px 0 rgba(74,64,49,.92));
+}
+.mark span:last-child{margin-bottom:-.08em}
+@media (min-width:720px){
+  .mark{display:flex;justify-content:center;align-items:flex-end;gap:.5em;
+    white-space:nowrap;margin-bottom:-.9vw}
+  .mark span{font-size:min(14.5vw,12rem)}
+  .mark span:last-child{margin-bottom:0}
+}
+@media (max-width:460px){
+  .foot-links{font-size:.78rem;gap:5px 11px;padding-bottom:16px}
+}
+@media (prefers-reduced-motion: no-preference){
+  .mark span{animation:markShine 6s ease-in-out infinite}
+  @keyframes markShine{0%,100%{background-position:0 0}50%{background-position:0 100%}}
+}
 </style>
 </head>
 <body>
+
+<!-- ============ persistent world spine (JS-only; hidden in fallbacks) ============ -->
+<div id="world" aria-hidden="true">
+  <div class="wsky bg-tan"></div>
+  <div class="wtint" id="tint-noon"></div>
+  <div class="wtint bg-green" id="tint-green"></div>
+  <div class="wtint" id="tint-gold"></div>
+  <div id="wset">
+    <i style="background:#F9D7DE"></i><i style="background:#F7D3C4"></i><i style="background:#F3CFA9"></i><i style="background:#F0CD96"></i><i style="background:#EECD8C"></i><i style="background:#EBC57D"></i><i style="background:#E8BC6C"></i><i style="background:#E5B25C"></i>
+  </div>
+  <img class="px" id="wsun" src="px/scene/sun.png" alt="">
+  <img class="px wcl drift" id="wclA" src="px/scene/cloud.png" alt="" style="width:clamp(96px,13vw,170px)">
+  <img class="px wcl drift2" id="wclB" src="px/scene/cloud.png" alt="" style="width:clamp(66px,9vw,110px)">
+  <svg class="wstar twinkle" style="left:14vw;top:9svh" viewBox="0 0 8 8"><use href="#px-plus"/></svg>
+  <svg class="wstar twinkle2" style="left:34vw;top:5svh;width:9px" viewBox="0 0 8 8"><use href="#px-plus"/></svg>
+  <svg class="wstar twinkle" style="right:30vw;top:12svh;width:8px" viewBox="0 0 8 8"><use href="#px-plus"/></svg>
+  <svg class="wstar twinkle2" style="right:12vw;top:7svh" viewBox="0 0 8 8"><use href="#px-plus"/></svg>
+</div>
+<div id="wband" aria-hidden="true">
+  <div class="wfen" id="wfenL"></div><div class="wfen" id="wfenR"></div>
+</div>
+<div id="trav" aria-hidden="true">
+  <div id="wbfly"><img class="px bfly-in" src="px/scene/butterfly.png" alt="" style="width:100%"></div>
+  <div id="wpol">
+    <div class="pwell">
+      <img class="wpa" style="top:8%;left:4%;width:16%;aspect-ratio:1" src="px/scene/sun.png" alt="">
+      <div class="wpg"></div>
+      <div class="wpa" style="bottom:6%;left:13%;width:21%"><img src="px/avatar/bunny_2.png" alt=""><img src="px/avatar/acc_star_glasses.png" alt=""></div>
+      <div class="wpa" style="bottom:8%;left:39%;width:24%"><img src="px/avatar/cat_0.png" alt=""></div>
+      <div class="wpa" style="bottom:5%;left:66%;width:20%"><img src="px/avatar/bear_1.png" alt=""><img src="px/avatar/acc_party_hat.png" alt=""></div>
+      <div class="devcov"></div>
+    </div>
+    <div class="pcap"></div>
+  </div>
+  <div class="waud" id="wa1"><img src="px/avatar/bear_1.png" alt=""><img src="px/avatar/acc_party_hat.png" alt=""></div>
+  <div class="waud" id="wa2"><img src="px/avatar/bunny_2.png" alt=""><img src="px/avatar/acc_star_glasses.png" alt=""></div>
+  <div class="waud" id="wa3"><img src="px/avatar/cat_5.png" alt=""><img src="px/avatar/acc_flower_crown.png" alt=""></div>
+  <div class="waud flip" id="wa4"><img src="px/avatar/frog_3.png" alt=""><img src="px/avatar/acc_beanie.png" alt=""></div>
+  <div class="waud flip" id="wa5"><img src="px/avatar/duck_4.png" alt=""><img src="px/avatar/acc_sunglasses.png" alt=""></div>
+  <div id="wcat"><div class="cin bob"><img src="px/avatar/cat_0.png" alt=""><img id="wcrown" src="px/avatar/acc_crown.png" alt=""></div></div>
+</div>
+<div class="wshut" id="shT" aria-hidden="true"></div>
+<div class="wshut" id="shB" aria-hidden="true"></div>
+<div class="wshut" id="shL" aria-hidden="true"></div>
+<div class="wshut" id="shR" aria-hidden="true"></div>
+<div id="wflash" aria-hidden="true"></div>
 
 <!-- ============ shared pixel-svg defs ============ -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -524,7 +622,8 @@ a{color:inherit;text-decoration:none}
 
   <div class="hint" aria-hidden="true">
     <img class="px hint-acorn" src="px/world/acorn.png" alt="">
-    <span>scroll</span>
+    <img class="px hint-sprout" src="px/world/sprouts.png" alt="">
+    <span class="hint-txt">scroll</span>
   </div>
 </section>
 
@@ -650,6 +749,7 @@ a{color:inherit;text-decoration:none}
     </div>
     <div class="ring r1" aria-hidden="true"></div>
     <div class="ring r2" aria-hidden="true"></div>
+    <div class="ring r3" aria-hidden="true"></div>
     <svg class="vheart vh1" viewBox="0 0 10 8" aria-hidden="true"><use href="#px-heart"/></svg>
     <svg class="vheart vh2" viewBox="0 0 10 8" aria-hidden="true"><use href="#px-heart"/></svg>
     <svg class="vheart vh3" viewBox="0 0 10 8" aria-hidden="true"><use href="#px-heart"/></svg>
@@ -685,13 +785,16 @@ a{color:inherit;text-decoration:none}
   </div>
 
   <div class="mem-grid">
-    <div class="polaroid mem-pol">
-      <span class="pin mem-pin p-green"></span>
+    <div class="polaroid mem-pol mem-travel">
+      <span class="pin mem-pin p-red"></span>
       <div class="pwell">
-        <svg class="mw" style="top:12%;left:8%;width:52%" viewBox="0 0 16 13" aria-hidden="true"><use href="#px-ramen"/></svg>
-        <div class="mw-av" style="bottom:6%;right:6%;width:30%" aria-hidden="true"><img src="px/avatar/duck_4.png" alt=""><img src="px/avatar/acc_sunglasses.png" alt=""></div>
+        <img class="mw" style="top:8%;left:4%;width:16%" src="px/scene/sun.png" alt="" aria-hidden="true">
+        <div class="pw-grass" aria-hidden="true"></div>
+        <div class="mw-av" style="bottom:6%;left:13%;width:21%" aria-hidden="true"><img src="px/avatar/bunny_2.png" alt=""><img src="px/avatar/acc_star_glasses.png" alt=""></div>
+        <div class="mw-av" style="bottom:8%;left:39%;width:24%" aria-hidden="true"><img src="px/avatar/cat_0.png" alt=""></div>
+        <div class="mw-av" style="bottom:5%;left:66%;width:20%" aria-hidden="true"><img src="px/avatar/bear_1.png" alt=""><img src="px/avatar/acc_party_hat.png" alt=""></div>
       </div>
-      <div class="pcap">ramen run</div>
+      <div class="pcap">the whole crew!!</div>
     </div>
     <div class="polaroid mem-pol">
       <span class="pin mem-pin p-blue"></span>
@@ -706,10 +809,10 @@ a{color:inherit;text-decoration:none}
     <div class="polaroid mem-pol">
       <span class="pin mem-pin p-purple"></span>
       <div class="pwell">
-        <svg class="mw" style="top:8%;left:30%;width:38%" viewBox="0 0 10 14" aria-hidden="true"><use href="#px-boba"/></svg>
-        <svg class="mw" style="top:16%;right:10%;width:12%;color:var(--tan-t)" viewBox="0 0 8 8" aria-hidden="true"><use href="#px-plus"/></svg>
+        <svg class="mw" style="top:12%;left:8%;width:52%" viewBox="0 0 16 13" aria-hidden="true"><use href="#px-ramen"/></svg>
+        <div class="mw-av" style="bottom:6%;right:6%;width:30%" aria-hidden="true"><img src="px/avatar/duck_4.png" alt=""><img src="px/avatar/acc_sunglasses.png" alt=""></div>
       </div>
-      <div class="pcap">boba!!</div>
+      <div class="pcap">ramen run</div>
     </div>
     <div class="polaroid mem-pol">
       <span class="pin mem-pin p-orange"></span>
@@ -737,6 +840,9 @@ a{color:inherit;text-decoration:none}
       <div class="pcap">board games</div>
     </div>
   </div>
+
+  <img class="px roll-a ra1" src="px/world/acorn.png" alt="" aria-hidden="true">
+  <img class="px roll-a ra2" src="px/world/acorn.png" alt="" aria-hidden="true">
 </section>
 
 <!-- ================= 7 · FINALE ================= -->
@@ -796,6 +902,8 @@ a{color:inherit;text-decoration:none}
     <img class="prop px" style="top:20px;left:52%;width:44px" src="px/world/sprouts.png" alt="" aria-hidden="true">
     <img class="decal px" style="top:38px;left:16%;width:60px" src="px/world/decal2.png" alt="" aria-hidden="true">
   </div>
+
+  <p class="credit">made at Hack the 6ix</p>
 </section>
 </main>
 
@@ -826,6 +934,74 @@ a{color:inherit;text-decoration:none}
   ScrollTrigger.config({ ignoreMobileResize: true });
 
   var q = function(s){ return document.querySelector(s); };
+  document.body.classList.add('wld'); // world spine on (fallbacks never reach this line)
+
+  /* ---------- world helpers + waypoint tables ---------- */
+  function vw(p){ return Math.round(innerWidth * p / 100); }
+  function sv(p){ return Math.round(innerHeight * p / 100); }
+  /* untransformed layout box of el relative to its .scene (== viewport while pinned) */
+  function secPos(el){
+    var x = 0, y = 0, n = el;
+    while (n && !(n.classList && n.classList.contains('scene'))){ x += n.offsetLeft; y += n.offsetTop; n = n.offsetParent; }
+    return { x: x, y: y, w: el.offsetWidth, h: el.offsetHeight };
+  }
+  var BH   = { 1: 24, 2: 26, 3: 16, 4: 16, 5: 16, 6: 10, 7: 25 };            // ground band svh per scene
+  var CATX = { 1: 50, 2: 50, 3: 18, 4: 71, 5: 6, 6: 26, 7: 50 };             // cat station centers, vw
+  var CATS = { 1: 1, 2: .9, 3: .78, 4: .85, 5: .8, 6: .78, 7: .96 };         // cat scale per station
+  var SUN  = [[12,10],[18,8],[25,6],[30,5],[38,4],[43,4],[50,3],[54,4],[61,6],[65,9],[71,14],[78,62]];
+  var BFL  = [[10,17],[30,20],[72,26],[58,16],[24,12],[40,26],[66,32],[52,20],[34,14],[20,10],[46,8],[58,66]];
+  var AUDX = [30, 40, 50, 60, 70];                                            // audience row centers, vw
+
+  function sunSeg(tl, i, dur, pos){
+    tl.to('#wsun', { x: function(){ return vw(SUN[i][0]) - q('#wsun').offsetWidth / 2; },
+                     y: function(){ return sv(SUN[i][1]); },
+                     duration: dur, ease: 'none', snap: { x: 2, y: 2 } }, pos);
+  }
+  function bflySeg(tl, i, dur, pos){
+    tl.to('#wbfly', { x: function(){ return vw(BFL[i][0]); }, y: function(){ return sv(BFL[i][1]); },
+                      duration: dur, ease: 'steps(12)' }, pos);
+  }
+  function bandTo(tl, pos, dur, st, stp){
+    tl.to('#wband', { height: function(){ return sv(BH[st]) + 28; }, duration: dur, ease: 'steps(' + stp + ')' }, pos);
+  }
+  function catWalk(tl, pos, dur, st, hops, face){
+    if (face) tl.to('#wcat .cin', { scaleX: face, duration: .03, ease: 'steps(1)' }, pos);
+    tl.to('#wcat', { x: function(){ return vw(CATX[st]) - 52; },
+                     y: function(){ return -(sv(BH[st]) - 26); },
+                     scale: CATS[st], duration: dur, ease: 'steps(' + hops + ')' }, pos);
+    var ks = [0], k; for (k = 0; k < hops; k++){ ks.push(-10, 0); }
+    tl.to('#wcat .cin', { keyframes: { y: ks, easeEach: 'steps(2)' }, duration: dur, ease: 'none' }, pos);
+    if (face) tl.to('#wcat .cin', { scaleX: 1, duration: .03, ease: 'steps(1)' }, pos + dur);
+  }
+  function zone(sel, fn){
+    var tl = gsap.timeline({ scrollTrigger: {
+      trigger: sel, start: 'top bottom', end: 'top top', scrub: .7, invalidateOnRefresh: true
+    }});
+    fn(tl);
+    tl.to({}, { duration: .001 }, 1);
+    return tl;
+  }
+
+  /* boot poses (also restored on refresh while at page top) */
+  function boots(){
+    gsap.set('#wsun', { x: vw(SUN[0][0]) - q('#wsun').offsetWidth / 2, y: sv(SUN[0][1]),
+                        filter: 'sepia(0) saturate(1) hue-rotate(0deg)' });
+    gsap.set('.wcl', { filter: 'sepia(0) saturate(1) hue-rotate(0deg)' });
+    gsap.set('#wcat', { x: vw(CATX[1]) - 52, y: -(sv(BH[1]) - 26), scale: 1 });
+    gsap.set('#wbfly', { x: vw(BFL[0][0]), y: sv(BFL[0][1]) });
+    gsap.set('#wband', { height: sv(BH[1]) + 28 });
+  }
+  function statics(){
+    gsap.set('.waud', { x: function(i){ return vw(AUDX[i]) - 23; }, y: function(){ return -(sv(26) - 14); } });
+  }
+  boots(); statics();
+  gsap.set('#wset i', { xPercent: function(i){ return i % 2 ? 108 : -108; } });
+  gsap.set('#wfenL', { xPercent: -103 });
+  gsap.set('#wfenR', { xPercent: 103 });
+  gsap.set('#wpol', { scaleX: 0 });
+  gsap.set('#wcrown', { y: -90, opacity: 0 });
+  gsap.set('.hint-sprout', { scale: .3 });
+  ScrollTrigger.addEventListener('refresh', function(){ statics(); if (scrollY < 8) boots(); });
 
   /* measure duel center shift before any transforms are applied */
   var duelShift = 0;
@@ -839,17 +1015,36 @@ a{color:inherit;text-decoration:none}
     .from('.ltr', { y: 24, opacity: 0, scale: .8, duration: .5, stagger: .045, ease: 'back.out(2.2)' })
     .from('.tagline', { y: 16, opacity: 0, duration: .45, ease: 'power2.out' }, '-=.15')
     .from('.dl-wrap', { scale: .4, opacity: 0, duration: .8, ease: 'elastic.out(1,.5)' }, '-=.1')
-    .from('.you-av', { scale: 0, transformOrigin: '50% 100%', duration: .6, ease: 'back.out(2.5)' }, .25)
+    .from('#wcat', { scale: 0, duration: .6, ease: 'back.out(2.5)' }, .25)
     .from('.hint', { opacity: 0, y: -10, duration: .4, ease: 'power1.out' }, '-=.2');
 
-  /* ---------- HERO: parallax on scroll-out ---------- */
-  gsap.timeline({ scrollTrigger: { trigger: '.sc-hero', start: 'top top', end: 'bottom top', scrub: .4 } })
-    .to('.hero-sun', { y: '20vh', x: '-4vw' }, 0)
-    .to('.c1', { x: '-16vw', y: '4vh' }, 0)
-    .to('.c2', { x: '12vw', y: '7vh' }, 0)
-    .to('.c3', { x: '-9vw', y: '3vh' }, 0)
-    .to('.hero-copy', { y: '-9vh' }, 0)
-    .to('.you-av', { x: '5vw' }, 0);
+  /* ---------- clouds: one slow parallax across the whole page ---------- */
+  gsap.timeline({ scrollTrigger: { trigger: 'main', start: 'top top', end: 'max', scrub: 1, invalidateOnRefresh: true } })
+    .to('#wclA', { x: function(){ return vw(30); }, ease: 'none', snap: { x: 2 } }, 0)
+    .to('#wclB', { x: function(){ return vw(14); }, ease: 'none', snap: { x: 2 } }, 0);
+
+  /* ---------- 1 -> 2: wordmark scatters, acorn sprouts, hill morphs into band ---------- */
+  gsap.timeline({ scrollTrigger: { trigger: '.sc-hero', start: 'top top', end: 'bottom top', scrub: .7, invalidateOnRefresh: true } })
+    .to('.hero-copy', { y: '-6vh', ease: 'none' }, 0)
+    .to('.ltr', { y: function(i){ return -sv(26 + ((i * 17) % 23)); },
+                  x: function(i){ return (i % 2 ? 1 : -1) * vw(2 + (i * 5) % 6); },
+                  rotation: function(i){ return (i % 2 ? 1 : -1) * (6 + (i * 3) % 9); },
+                  duration: .55, ease: 'steps(9)', stagger: { each: .03, from: 'center' } }, .06)
+    .to('.tagline', { y: -60, autoAlpha: 0, duration: .3, ease: 'steps(5)' }, .1)
+    .to('.hint-txt', { autoAlpha: 0, duration: .12 }, 0)
+    .to('.hint-acorn', { y: 26, duration: .2, ease: 'steps(3)' }, .05)
+    .to('.hint-acorn', { opacity: 0, duration: .03, ease: 'steps(1)' }, .3)
+    .to('.hint-sprout', { opacity: 1, duration: .03, ease: 'steps(1)' }, .3)
+    .to('.hint-sprout', { scale: 1, duration: .25, ease: 'steps(3)' }, .33)
+    .call(function(){}, null, .5);
+  (function(){
+    var t = gsap.timeline({ scrollTrigger: { trigger: '.sc-hero', start: 'top top', end: 'bottom top', scrub: .7, invalidateOnRefresh: true } });
+    bandTo(t, .3, .55, 2, 6);
+    t.to('#wcat', { y: function(){ return -(sv(BH[2]) - 26); }, scale: CATS[2], duration: .55, ease: 'steps(6)' }, .3);
+    sunSeg(t, 1, .9, .05);
+    bflySeg(t, 1, .9, .05);
+    t.to({}, { duration: .001 }, 1);
+  })();
 
   /* ---------- Download button: squash-launch vanish / bounce return ---------- */
   var btnHidden = false;
@@ -885,113 +1080,283 @@ a{color:inherit;text-decoration:none}
   }
   ScrollTrigger.create({ start: 8, end: 'max', onEnter: hideBtn, onLeaveBack: showBtn });
 
-  /* ---------- 2 · FRIENDS: crew hops in (chunky stepped locomotion) ---------- */
+  /* ---------- 2 · FRIENDS: crew hops in, then clusters into the audience row ---------- */
   gsap.set('.sc-friends .line', { opacity: 0, y: 26, scale: .92 });
   var friends = ['.fb1', '.fb2', '.fb3', '.fb4', '.fb5'];
   var fromX = ['-70vw', '-80vw', '75vw', '85vw', '-90vw'];
+  var rowCX = [30, 40, 60, 70, 50];      /* fb1..fb5 -> audience slots (waud order bear,bunny,cat5,frog,duck) */
+  var fbW   = [80, 68, 76, 82, 60];
   gsap.set(friends.join(','), { x: function(i){ return fromX[i]; } });
   var ftl = gsap.timeline({ scrollTrigger: {
-    trigger: '.sc-friends', start: 'top top', end: '+=150%', scrub: .5, pin: true, anticipatePin: 1
+    trigger: '.sc-friends', start: 'top top', end: '+=150%', scrub: .5, pin: true, anticipatePin: 1, invalidateOnRefresh: true
   }});
   friends.forEach(function(s, i){
-    ftl.to(s, { x: 0, duration: 1, ease: 'steps(22)' }, i * .35);
-    ftl.to(s, { keyframes: { y: [0, -34, 0, -20, 0, -8, 0], easeEach: 'steps(4)' }, duration: 1, ease: 'none' }, i * .35);
+    ftl.to(s, { x: 0, duration: 1.4, ease: 'steps(22)' }, i * .7);
+    ftl.to(s, { keyframes: { y: [0, -34, 0, -20, 0, -8, 0], easeEach: 'steps(4)' }, duration: 1.4, ease: 'none' }, i * .7);
   });
-  ftl.to('.sc-friends .line', { opacity: 1, y: 0, scale: 1, duration: .5, ease: 'back.out(2)' }, '-=.4');
+  ftl.to('.sc-friends .line', { opacity: 1, y: 0, scale: 1, duration: .5, ease: 'back.out(2)' }, 3.4);
+  friends.forEach(function(s, i){       /* celebratory ripple mid-scene */
+    ftl.to(s, { y: -18, duration: .18, yoyo: true, repeat: 1, ease: 'steps(2)' }, 5.4 + i * .12);
+  });
+  /* exit: gather small at the front edge, hand off to the fixed audience row */
+  friends.forEach(function(s, i){
+    var el = q(s);
+    ftl.to(s, { x: function(){ var p = secPos(el); return vw(rowCX[i]) - (p.x + p.w / 2); },
+                y: function(){ var p = secPos(el); return (innerHeight - (sv(26) - 14)) - (p.y + p.h); },
+                scale: 46 / fbW[i], transformOrigin: '50% 100%',
+                duration: 1.5, ease: 'steps(10)' }, 8 + i * .06);
+  });
+  ftl.to('.sc-friends .line', { y: -40, autoAlpha: 0, duration: .8, ease: 'steps(6)' }, 8.1);
+  ftl.to(friends.join(','), { autoAlpha: 0, duration: .1, ease: 'steps(1)' }, 9.78);
+  ftl.to('.waud', { autoAlpha: 1, duration: .1, ease: 'steps(1)' }, 9.8);
+  sunSeg(ftl, 2, 10, 0);
+  bflySeg(ftl, 2, 9, .5);
+  ftl.to({}, { duration: .001 }, 10);
 
-  /* ---------- 3 · DUEL: panels face off, pick a winner ---------- */
-  gsap.set('.card-l', { x: '-75vw' });
-  gsap.set('.card-r', { x: '75vw' });
+  /* ---------- 2 -> 3: cat strolls left, sky warms to noon, band lowers ---------- */
+  zone('.sc-duel', function(t){
+    bandTo(t, .15, .6, 3, 12);
+    catWalk(t, .12, .66, 3, 12, -1);
+    t.to('.waud', { y: function(){ return -(sv(16) - 14); }, duration: .6, ease: 'steps(12)' }, .15);
+    t.to('#tint-noon', { opacity: 1, duration: .5, ease: 'steps(4)' }, .3);
+    sunSeg(t, 3, .9, .05);
+  });
+
+  /* ---------- 3 · DUEL: panels drop in, audience watches, winner flips into a photo ---------- */
+  gsap.set('.card-l', { y: '-85vh' });
+  gsap.set('.card-r', { y: '-100vh' });
   gsap.set('.badge', { scale: 0 });
   gsap.set('.sc-duel .line', { opacity: 0, y: 24 });
-  gsap.timeline({ scrollTrigger: {
-    trigger: '.sc-duel', start: 'top top', end: '+=170%', scrub: .5, pin: true, anticipatePin: 1
-  }})
-    .to('.sc-duel .line', { opacity: 1, y: 0, duration: .4, ease: 'back.out(2)' }, 0)
-    .to('.card-l', { x: 0, duration: .9, ease: 'power2.out' }, .25)
-    .to('.card-r', { x: 0, duration: .9, ease: 'power2.out' }, .32)
-    .to('.card-l', { keyframes: { x: [0, 16, -6, 10, 0] }, duration: .8 }, 1.4)
-    .to('.card-r', { keyframes: { x: [0, -16, 6, -10, 0] }, duration: .8 }, 1.4)
-    .to('.card-r', { x: '95vw', y: '6vh', duration: .8, ease: 'power2.in' }, 2.4)
-    .to('.card-l', { x: duelShift, scale: 1.14, duration: .7, ease: 'back.out(2)' }, 2.5)
-    .to('.badge', { scale: 1, duration: .4, ease: 'back.out(3)' }, 3.05)
-    .to('.card-l', { y: -10, duration: .2, yoyo: true, repeat: 1, ease: 'power1.inOut' }, 3.35);
+  var dtl = gsap.timeline({ scrollTrigger: {
+    trigger: '.sc-duel', start: 'top top', end: '+=170%', scrub: .5, pin: true, anticipatePin: 1, invalidateOnRefresh: true
+  }});
+  dtl.to('.sc-duel .line', { opacity: 1, y: 0, duration: .4, ease: 'back.out(2)' }, 0)
+    .to('.card-l', { y: 0, duration: 1.5, ease: 'steps(14)' }, .3)
+    .to('.card-r', { y: 0, duration: 1.5, ease: 'steps(14)' }, .8)
+    .to('.card-l', { keyframes: { x: [0, 16, -6, 10, 0] }, duration: .8 }, 2.8)
+    .to('.card-r', { keyframes: { x: [0, -16, 6, -10, 0] }, duration: .8 }, 2.8)
+    .to('.waud', { y: '-=10', duration: .14, yoyo: true, repeat: 1, ease: 'steps(2)', stagger: .1 }, 3.1)
+    .to('.card-r', { y: '+=78vh', duration: 1.2, ease: 'power1.in' }, 4.4)          /* loser sinks under the grass */
+    .to('.card-r', { autoAlpha: 0, duration: .35, ease: 'steps(3)' }, 5.15)
+    .to('.card-l', { x: duelShift, scale: 1.14, duration: .7, ease: 'back.out(2)' }, 4.5)
+    .to('.badge', { scale: 1, duration: .4, ease: 'back.out(3)' }, 5.4)
+    .to('.waud', { y: '-=16', duration: .14, yoyo: true, repeat: 1, ease: 'steps(2)', stagger: .07 }, 5.75) /* audience cheers */
+    .to('.card-l', { y: -10, duration: .2, yoyo: true, repeat: 1, ease: 'power1.inOut' }, 6.1);
+  /* exit: winning panel carries to center-low and pixel-flips into the polaroid */
+  var cardL = q('.card-l');
+  dtl.to('.sc-duel .line', { y: -36, autoAlpha: 0, duration: .6, ease: 'steps(5)' }, 8)
+    .to('.card-l', { x: function(){ var p = secPos(cardL); return vw(50) - (p.x + p.w / 2); },
+                     y: function(){ var p = secPos(cardL); return sv(58) - (p.y + p.h / 2); },
+                     scaleX: .62, scaleY: .62, transformOrigin: '50% 50%',
+                     duration: 1.25, ease: 'steps(11)' }, 8.1)
+    .to('#wpol', { x: function(){ return vw(50) - q('#wpol').offsetWidth / 2; },
+                   y: function(){ return sv(58) - q('#wpol').offsetHeight / 2; },
+                   duration: .1 }, 9.4)
+    .to('.card-l', { scaleX: 0, duration: .32, ease: 'steps(3)' }, 9.62)
+    .to('.card-l', { autoAlpha: 0, duration: .03, ease: 'steps(1)' }, 9.95)
+    .to('#wpol', { autoAlpha: 1, duration: .03, ease: 'steps(1)' }, 9.96);
+  sunSeg(dtl, 4, 10, 0);
+  bflySeg(dtl, 4, 9, .5);
+  dtl.to({}, { duration: .001 }, 10);
 
-  /* ---------- 4 · PHOTO: polaroid develops ---------- */
-  gsap.set('.big-pol', { y: '85vh' });
+  /* ---------- 3 -> 4: polaroid pixel-flips open; audience walks behind it ---------- */
+  zone('.sc-photo', function(t){
+    t.to('#wpol', { scaleX: 1, duration: .1, ease: 'steps(2)' }, .02);
+    t.to('#wpol', { x: function(){ var p = secPos(q('.big-pol')); return (p.x + p.w / 2) - q('#wpol').offsetWidth / 2; },
+                    y: function(){ var p = secPos(q('.big-pol')); return (p.y + p.h / 2) - q('#wpol').offsetHeight / 2 - 30; },
+                    scale: function(){ return (secPos(q('.big-pol')).w / q('#wpol').offsetWidth) * .92; },
+                    duration: .6, ease: 'steps(10)' }, .3);
+    t.to('.waud', { x: function(i){ return vw(44 + i * 3) - 23; }, duration: .5, ease: 'steps(8)' }, .25);
+    t.to('.waud', { autoAlpha: 0, duration: .18, ease: 'steps(2)', stagger: .05 }, .52);
+    catWalk(t, .2, .6, 4, 12, null);
+    sunSeg(t, 5, .9, .05);
+  });
+
+  /* ---------- 4 · PHOTO: traveling polaroid lands, grows, develops ---------- */
+  gsap.set('.big-pol', { autoAlpha: 0, transformOrigin: '50% 50%' });
   gsap.set('.big-pol .pin', { scale: 0 });
-  gsap.set('.devcov', { opacity: 1 });
+  gsap.set('.big-pol .devcov', { opacity: 1 });
   gsap.set('.sc-photo .line', { opacity: 0, y: 24 });
-  gsap.timeline({ scrollTrigger: {
-    trigger: '.sc-photo', start: 'top top', end: '+=150%', scrub: .5, pin: true, anticipatePin: 1
-  }})
-    .to('.sc-photo .line', { opacity: 1, y: 0, duration: .4, ease: 'back.out(2)' }, 0)
-    .to('.big-pol', { y: 0, duration: 1.1, ease: 'power2.out' }, .2)
-    .to('.big-pol .pin', { scale: 1, duration: .3, ease: 'back.out(3.5)' }, 1.28)
-    .to('.big-pol', { y: -8, duration: .18, yoyo: true, repeat: 1, ease: 'power1.inOut' }, 1.3)
-    .to('.devcov', { opacity: 0, duration: 1.1, ease: 'steps(8)' }, 1.7)
-    .to('.sc-photo .line', { scale: 1.06, duration: .2, yoyo: true, repeat: 1 }, 2.7);
+  var bigPol = q('.big-pol');
+  function carryX(){ return vw(78) - q('#wpol').offsetWidth / 2; }
+  function carryY(){ return innerHeight - sv(16) - q('#wpol').offsetHeight + 16; }
+  var ptl = gsap.timeline({ scrollTrigger: {
+    trigger: '.sc-photo', start: 'top top', end: '+=150%', scrub: .5, pin: true, anticipatePin: 1, invalidateOnRefresh: true
+  }});
+  ptl.to('#wpol', { x: function(){ var p = secPos(bigPol); return (p.x + p.w / 2) - q('#wpol').offsetWidth / 2; },
+                    y: function(){ var p = secPos(bigPol); return (p.y + p.h / 2) - q('#wpol').offsetHeight / 2; },
+                    scale: function(){ return secPos(bigPol).w / q('#wpol').offsetWidth; },
+                    duration: .9, ease: 'steps(8)' }, 0)
+    .to('#wpol', { autoAlpha: 0, duration: .05, ease: 'steps(1)' }, 1)
+    .to('.big-pol', { autoAlpha: 1, duration: .05, ease: 'steps(1)' }, 1.02)
+    .to('.sc-photo .line', { opacity: 1, y: 0, duration: .4, ease: 'back.out(2)' }, 1.1)
+    .to('.big-pol .pin', { scale: 1, duration: .3, ease: 'back.out(3.5)' }, 1.3)
+    .to('.big-pol', { y: -8, duration: .18, yoyo: true, repeat: 1, ease: 'power1.inOut' }, 1.35)
+    .to('.big-pol .devcov', { opacity: 0, duration: 1.6, ease: 'steps(8)' }, 2.2)
+    .to('#wpol .devcov', { opacity: 0, duration: .05, ease: 'steps(1)' }, 3.7)
+    .to('.sc-photo .line', { scale: 1.06, duration: .2, yoyo: true, repeat: 1 }, 4.1);
+  /* exit: photo shrinks to carrying size and tucks in beside the cat */
+  ptl.to('.sc-photo .line', { y: -36, autoAlpha: 0, duration: .6, ease: 'steps(5)' }, 8)
+    .to('.big-pol', { x: function(){ var p = secPos(bigPol); return (carryX() + q('#wpol').offsetWidth / 2) - (p.x + p.w / 2); },
+                      y: function(){ var p = secPos(bigPol); return (carryY() + q('#wpol').offsetHeight / 2) - (p.y + p.h / 2); },
+                      scale: function(){ return q('#wpol').offsetWidth / secPos(bigPol).w; },
+                      duration: 1.5, ease: 'steps(12)' }, 8.1)
+    .to('#wpol', { x: carryX, y: carryY, scale: 1, duration: .1 }, 9.6)
+    .to('.big-pol', { autoAlpha: 0, duration: .04, ease: 'steps(1)' }, 9.86)
+    .to('#wpol', { autoAlpha: 1, duration: .04, ease: 'steps(1)' }, 9.88);
+  sunSeg(ptl, 6, 10, 0);
+  bflySeg(ptl, 6, 9, .5);
+  ptl.to({}, { duration: .001 }, 10);
 
-  /* ---------- 5 · TAP: phones lean in, tap corners, hearts + acorn rain ---------- */
+  /* ---------- 4 -> 5: two-frame camera flash motivates the cut to green ---------- */
+  zone('.sc-tap', function(t){
+    t.to('#wflash', { opacity: 1, duration: .03, ease: 'steps(1)' }, .02);
+    t.to('#tint-green', { opacity: 1, duration: .02, ease: 'steps(1)' }, .06);
+    t.to('#tint-noon', { opacity: 0, duration: .02, ease: 'steps(1)' }, .06);
+    t.to('#wflash', { opacity: 0, duration: .55, ease: 'steps(4)' }, .14);
+    t.to('.phone-l', { x: function(){ return -vw(16); }, duration: .55, ease: 'power2.out' }, .2);
+    t.to('.phone-r', { x: function(){ return vw(16); }, duration: .55, ease: 'power2.out' }, .26);
+    catWalk(t, .25, .6, 5, 12, -1);
+    t.to('#wpol', { x: function(){ return vw(95) - q('#wpol').offsetWidth / 2; },
+                    y: function(){ return innerHeight - sv(16) + 12 - q('#wpol').offsetHeight * .8; },
+                    scale: .6, duration: .5, ease: 'steps(8)' }, .3);
+    sunSeg(t, 7, .9, .05);
+    bflySeg(t, 7, .9, .05);
+  });
+
+  /* ---------- 5 · TAP: phones tap, hearts + acorn rain, pulse squares the screen ---------- */
   gsap.set('.phone-l', { x: '-55vw' });
   gsap.set('.phone-r', { x: '55vw' });
   gsap.set('.ring', { scale: .15, opacity: 0 });
   gsap.set('.vheart', { opacity: 0, y: 0, scale: .5 });
-  gsap.set('.rain', { y: '-75vh' });
+  gsap.set('.rain', { y: '-75vh', autoAlpha: 0 });
   gsap.set('.sc-tap .line', { opacity: 0, y: 24 });
   var ttl = gsap.timeline({ scrollTrigger: {
-    trigger: '.sc-tap', start: 'top top', end: '+=200%', scrub: .5, pin: true, anticipatePin: 1
+    trigger: '.sc-tap', start: 'top top', end: '+=200%', scrub: .5, pin: true, anticipatePin: 1, invalidateOnRefresh: true
   }});
   ttl.to('.sc-tap .line', { opacity: 1, y: 0, duration: .4, ease: 'back.out(2)' }, 0)
      .to('.phone-l', { x: 0, duration: 1, ease: 'power2.out' }, .3)
      .to('.phone-r', { x: 0, duration: 1, ease: 'power2.out' }, .38)
-     .to('.phone-l', { rotation: 9, duration: .18, yoyo: true, repeat: 1, ease: 'power1.inOut' }, 1.42)
-     .to('.phone-r', { rotation: -9, duration: .18, yoyo: true, repeat: 1, ease: 'power1.inOut' }, 1.42)
-     .to('.r1', { opacity: .9, duration: .05 }, 1.5)
-     .to('.r1', { scale: 2.6, opacity: 0, duration: .55, ease: 'steps(6)' }, 1.55)
-     .to('.r2', { opacity: .9, duration: .05 }, 1.72)
-     .to('.r2', { scale: 3.1, opacity: 0, duration: .6, ease: 'steps(6)' }, 1.77);
+     .to('.phone-l', { rotation: 9, duration: .18, yoyo: true, repeat: 1, ease: 'power1.inOut' }, 1.6)
+     .to('.phone-r', { rotation: -9, duration: .18, yoyo: true, repeat: 1, ease: 'power1.inOut' }, 1.6)
+     .to('.r1', { opacity: .9, duration: .05 }, 1.7)
+     .to('.r1', { scale: 2.6, opacity: 0, duration: .55, ease: 'steps(6)' }, 1.75)
+     .to('.r2', { opacity: .9, duration: .05 }, 1.95)
+     .to('.r2', { scale: 3.1, opacity: 0, duration: .6, ease: 'steps(6)' }, 2.0);
   ['.vh1', '.vh2', '.vh3', '.vh4', '.vh5'].forEach(function(s, i){
-    var t = 1.6 + i * .14;
+    var t = 1.85 + i * .16;
     ttl.to(s, { opacity: 1, scale: 1, duration: .15 }, t)
-       .to(s, { y: -150 - i * 22, duration: 1, ease: 'steps(10)' }, t)
-       .to(s, { keyframes: { x: [0, (i % 2 ? 14 : -14), (i % 2 ? -9 : 9), 0], easeEach: 'steps(3)' }, duration: 1 }, t)
-       .to(s, { opacity: 0, duration: .3 }, t + .72);
+       .to(s, { y: -150 - i * 22, duration: 1.1, ease: 'steps(10)' }, t)
+       .to(s, { keyframes: { x: [0, (i % 2 ? 14 : -14), (i % 2 ? -9 : 9), 0], easeEach: 'steps(3)' }, duration: 1.1 }, t)
+       .to(s, { opacity: 0, duration: .3 }, t + .8);
   });
-  ttl.to('.rain', { y: 0, duration: .9, ease: 'bounce.out', stagger: .07 }, 1.7);
+  ttl.to('.rain', { autoAlpha: 1, duration: .04, ease: 'steps(1)', stagger: .07 }, 2.26)
+     .to('.rain', { y: 0, duration: .9, ease: 'bounce.out', stagger: .07 }, 2.3);
+  ttl.to('.phone-l', { rotation: 5, duration: .3, yoyo: true, repeat: 1, ease: 'steps(3)' }, 6.4)
+     .to('.phone-r', { rotation: -5, duration: .3, yoyo: true, repeat: 1, ease: 'steps(3)' }, 6.4);
+  /* exit: acorns roll off toward the wall; the last pulse squares over the screen */
+  ttl.to('.rain', { x: function(){ return vw(120); }, duration: 1.6, ease: 'steps(20)', stagger: .06 }, 9.5)
+     .to('.rain', { rotation: 810, duration: 1.6, ease: 'steps(9)', stagger: .06 }, 9.5)
+     .to('.sc-tap .line', { y: -36, autoAlpha: 0, duration: .6, ease: 'steps(5)' }, 9.6)
+     .to('.r3', { opacity: .95, duration: .05, ease: 'steps(1)' }, 10.5)
+     .to('.r3', { scale: 24, duration: 1.2, ease: 'steps(8)' }, 10.55)
+     .fromTo('#shT,#shB', { scaleY: 0 }, { scaleY: 1, duration: .7, ease: 'steps(5)', immediateRender: false }, 11.2)
+     .fromTo('#shL,#shR', { scaleX: 0 }, { scaleX: 1, duration: .7, ease: 'steps(5)', immediateRender: false }, 11.2)
+     .to('.r3', { opacity: 0, duration: .06, ease: 'steps(1)' }, 11.92);
+  sunSeg(ttl, 8, 12, 0);
+  bflySeg(ttl, 8, 11, .5);
+  ttl.to({}, { duration: .001 }, 12);
 
-  /* ---------- 6 · MEMORY BOOK: wall assembles, "No memories yet." gets struck ---------- */
-  gsap.set('.mem-pol', { y: 24, scale: .8, opacity: 0 });
+  /* ---------- 5 -> 6: square iris opens on the wall; sky turns golden ---------- */
+  zone('.sc-book', function(t){
+    t.fromTo('#shT,#shB', { scaleY: 1 }, { scaleY: 0, duration: .8, ease: 'steps(7)', immediateRender: false }, .05);
+    t.fromTo('#shL,#shR', { scaleX: 1 }, { scaleX: 0, duration: .8, ease: 'steps(7)', immediateRender: false }, .05);
+    t.to('#tint-gold', { opacity: 1, duration: .5, ease: 'steps(5)' }, .25);
+    t.to('#tint-green', { opacity: 0, duration: .5, ease: 'steps(5)' }, .3);
+    bandTo(t, .2, .6, 6, 12);
+    catWalk(t, .18, .64, 6, 12, -1);
+    t.to('#wpol', { x: function(){ return vw(36) - q('#wpol').offsetWidth / 2; },
+                    y: function(){ return innerHeight - sv(10) + 12 - q('#wpol').offsetHeight * .925; },
+                    scale: .85, duration: .64, ease: 'steps(12)' }, .18);
+    t.to('#wsun', { filter: 'sepia(.24) saturate(1.18) hue-rotate(-4deg)', duration: .06, ease: 'steps(1)' }, .4);
+    sunSeg(t, 9, .9, .05);
+  });
+
+  /* ---------- 6 · MEMORY BOOK: traveling photo pins first, wall assembles around it ---------- */
+  gsap.set('.mem-pol:not(.mem-travel)', { y: 24, scale: .8, opacity: 0 });
+  gsap.set('.mem-travel', { autoAlpha: 0 });
   gsap.set('.mem-pin', { scale: 0 });
   gsap.set('.strike', { scaleX: 0 });
-  gsap.set('.empty-wrap', { y: 10, opacity: 0 });
-  gsap.timeline({ scrollTrigger: {
-    trigger: '.sc-book', start: 'top top', end: '+=180%', scrub: .5, pin: true, anticipatePin: 1
-  }})
-    .to('.empty-wrap', { y: 0, opacity: 1, duration: .35, ease: 'power2.out' }, 0)
-    .to('.mem-pol', { y: 0, scale: 1, opacity: 1, duration: .5,
-                      ease: 'back.out(1.9)', stagger: .24 }, .5)
-    .to('.mem-pin', { scale: 1, duration: .3, ease: 'back.out(3.5)', stagger: .24 }, .82)
-    .to('.strike', { scaleX: 1, duration: .4, ease: 'steps(9)' }, 1.7)
-    .to('.empty-line', { opacity: .45, duration: .3 }, 1.8);
+  gsap.set('.roll-a', { x: function(){ return -vw(60); }, rotation: -720 });
+  var memT = q('.mem-travel');
+  var btl = gsap.timeline({ scrollTrigger: {
+    trigger: '.sc-book', start: 'top top', end: '+=180%', scrub: .5, pin: true, anticipatePin: 1, invalidateOnRefresh: true
+  }});
+  btl.to('#wpol', { x: function(){ var p = secPos(memT); return (p.x + p.w / 2) - q('#wpol').offsetWidth / 2; },
+                   y: function(){ var p = secPos(memT); return (p.y + p.h / 2) - q('#wpol').offsetHeight / 2; },
+                   scale: function(){ return secPos(memT).w / q('#wpol').offsetWidth; },
+                   duration: 1.3, ease: 'steps(12)' }, .2)
+    .to('#wpol', { autoAlpha: 0, duration: .05, ease: 'steps(1)' }, 1.55)
+    .to('.mem-travel', { autoAlpha: 1, duration: .05, ease: 'steps(1)' }, 1.58)
+    .to('.mem-travel .mem-pin', { scale: 1, duration: .3, ease: 'back.out(3.5)' }, 1.75)
+    .to('.roll-a', { x: 0, duration: 2, ease: 'steps(22)', stagger: .3 }, .6)
+    .to('.roll-a', { rotation: 0, duration: 2, ease: 'steps(8)', stagger: .3 }, .6)
+    .to('.mem-pol:not(.mem-travel)', { y: 0, scale: 1, opacity: 1, duration: .5,
+                      ease: 'back.out(1.9)', stagger: .3 }, 2.1)
+    .to('.mem-pol:not(.mem-travel) .mem-pin', { scale: 1, duration: .3, ease: 'back.out(3.5)', stagger: .3 }, 2.42)
+    .to('.strike', { scaleX: 1, duration: .45, ease: 'steps(9)' }, 4.6)
+    .to('.empty-line', { opacity: .45, duration: .3 }, 4.75);
+  /* exit: pins pop off, polaroids tilt and fly up and away */
+  btl.to('.mem-pin', { scale: 0, duration: .16, ease: 'steps(2)', stagger: .05 }, 8)
+    .to('.mem-pol', { y: function(){ return -sv(96); },
+                      rotation: function(i){ return (i % 2 ? 1 : -1) * (7 + i * 2); },
+                      duration: 1.6, ease: 'power1.in', stagger: .08 }, 8.25)
+    .to('.empty-wrap', { y: function(){ return -sv(85); }, rotation: -5, duration: 1.4, ease: 'power1.in' }, 8.45);
+  sunSeg(btl, 10, 10, 0);
+  bflySeg(btl, 10, 9, .5);
+  btl.to({}, { duration: .001 }, 10);
 
-  /* ---------- 7 · FINALE: everyone gathers, cat gets crowned ---------- */
-  gsap.set('.fin-av', { y: 40, scale: 0, transformOrigin: '50% 100%' });
-  gsap.set('.crown-drop', { y: -70, opacity: 0 });
+  /* ---------- 6 -> 7: dusk bands, fence tiles in, the crew walks home ---------- */
+  var walkers = ['.fn2', '.fn3', '.fn6', '.fn4', '.fn5'];
+  var walkX = ['-84vw', '-92vw', '-74vw', '84vw', '92vw'];
+  gsap.set(walkers.join(','), { x: function(i){ return walkX[i]; } });
+  zone('.sc-finale', function(t){
+    t.to('#wset i', { xPercent: 0, duration: .42, ease: 'steps(9)', stagger: .055 }, .08);
+    bandTo(t, .15, .7, 7, 12);
+    t.to('#wfenL,#wfenR', { xPercent: 0, duration: .5, ease: 'steps(11)' }, .34);
+    catWalk(t, .4, .58, 7, 12, null);
+    walkers.forEach(function(s, i){
+      t.to(s, { x: 0, duration: .5, ease: 'steps(16)' }, .3 + i * .06);
+      t.to(s, { keyframes: { y: [0, -22, 0, -14, 0, -6, 0], easeEach: 'steps(3)' }, duration: .5, ease: 'none' }, .3 + i * .06);
+    });
+    t.to('#wsun', { filter: 'sepia(.5) saturate(1.4) hue-rotate(-10deg)', duration: .06, ease: 'steps(1)' }, .5);
+    t.to('.wcl', { filter: 'sepia(.35) saturate(1.2) hue-rotate(-26deg)', duration: .06, ease: 'steps(1)' }, .55);
+    t.to('.wstar', { visibility: 'visible', duration: .02, stagger: .08 }, .72);
+    sunSeg(t, 11, .92, .05);
+    bflySeg(t, 11, .9, .06);
+  });
+
+  /* ---------- 7 · FINALE: CTAs pop, crown lands on the cat ---------- */
   gsap.set('.cta-big, .cta-web', { scale: .4, opacity: 0 });
   gsap.set('.fin-acorn', { y: -110, opacity: 0 });
   gsap.set('.credit', { opacity: 0, y: 12 });
   var finTl = gsap.timeline({ paused: true })
-    .to('.fin-av', { y: 0, scale: 1, duration: .6, ease: 'back.out(2.2)', stagger: .08 }, 0)
-    .to('.cta-big, .cta-web', { scale: 1, opacity: 1, duration: .9, ease: 'elastic.out(1,.5)', stagger: .16 }, .2)
-    .to('.fin-acorn', { y: 0, opacity: 1, duration: .7, ease: 'bounce.out', stagger: .09 }, .4)
-    .to('.crown-drop', { y: 0, opacity: 1, duration: .7, ease: 'bounce.out' }, .8)
-    .to('.credit', { opacity: 1, y: 0, duration: .5 }, 1);
+    .to('.cta-big, .cta-web', { scale: 1, opacity: 1, duration: .9, ease: 'elastic.out(1,.5)', stagger: .16 }, .1)
+    .to('.fin-acorn', { y: 0, opacity: 1, duration: .7, ease: 'bounce.out', stagger: .09 }, .3)
+    .to('.credit', { opacity: 1, y: 0, duration: .5 }, .9);
   var finGo = function(){ if (finTl.paused()) finTl.play(); };
   ScrollTrigger.create({
-    trigger: '.sc-finale', start: 'top 70%',
+    trigger: '.sc-finale', start: 'top 60%',
     onEnter: finGo,
     onRefresh: function(self){ if (self.progress > 0) finGo(); }
+  });
+  /* crown rides the fixed cat, so it must come off when scrolling back up */
+  function crownOn(){ gsap.to('#wcrown', { y: 0, opacity: 1, duration: .7, ease: 'bounce.out' }); }
+  function crownOff(){ gsap.to('#wcrown', { y: -90, opacity: 0, duration: .2, ease: 'steps(2)' }); }
+  ScrollTrigger.create({
+    trigger: '.sc-finale', start: 'top 45%',
+    onEnter: crownOn, onLeaveBack: crownOff,
+    onRefresh: function(self){ if (self.progress > 0) crownOn(); }
   });
 
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ ScrollTrigger.refresh(); });
