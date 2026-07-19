@@ -562,6 +562,152 @@ describe('webhooks (verified, real HMAC)', () => {
     assert.equal(r.status, 200);
     assert.equal(await bal(id), MIN_WITHDRAW_UNITS); // refunded
   });
+
+  // ---- A5 acceptance: zero-amount events + webhook/poll convergence ----
+
+  // Signed deposit.direct_execution.completed payload for one execution.
+  const depositEvent = (
+    evId: string,
+    execId: string,
+    userId: string,
+    destinationAmount: string,
+  ) =>
+    JSON.stringify({
+      id: evId,
+      object: 'event',
+      type: 'deposit.direct_execution.completed',
+      created: 1737075600,
+      livemode: false,
+      data: {
+        object: {
+          id: execId,
+          external_user_id: userId,
+          treasury_account_id: 'ta_test_not_a_real_account',
+          status: 'completed',
+          amount: destinationAmount,
+          details: {
+            destination_chain_type: 'ethereum',
+            destination_chain_id: '8453',
+            destination_token_address: DEST.token_address,
+            destination_token_symbol: 'USDC',
+            destination_amount: destinationAmount,
+          },
+        },
+      },
+    });
+
+  const postDepositWebhook = (
+    evId: string,
+    execId: string,
+    userId: string,
+    destinationAmount: string,
+  ) => {
+    const payload = depositEvent(evId, execId, userId, destinationAmount);
+    return request(app)
+      .post('/webhooks/unifold')
+      .set('Content-Type', 'application/json')
+      .set(sign(evId, payload))
+      .send(payload);
+  };
+
+  // Poll-path execution record for the same execution id (owned deposit shape).
+  const pollExecution = (execId: string, amountBaseUnits: string) => ({
+    id: execId,
+    action_type: 'deposit',
+    status: 'succeeded',
+    recipient_address: '0xTREASURYADDR',
+    destination_chain_type: 'ethereum',
+    destination_chain_id: '8453',
+    destination_token_address: DEST.token_address,
+    destination_amount_base_unit: amountBaseUnits,
+  });
+
+  test('zero-amount deposit webhook credits nothing and leaves the deposit reference unclaimed for a later valid webhook', async () => {
+    const id = await newUser();
+    const execId = `exec_zero_wh_${id}`;
+
+    const zero = await postDepositWebhook(`evt_zero_${id}`, execId, id, '0');
+    assert.equal(zero.status, 200);
+    assert.equal(zero.body.handled, false);
+    assert.equal(zero.body.reason, 'not_owned');
+    assert.equal(await bal(id), '0'); // nothing credited
+
+    // The rejected zero-amount event must not have claimed deposit:<execId>,
+    // so a later valid webhook for the SAME execution still credits in full.
+    const valid = await postDepositWebhook(`evt_zero_retry_${id}`, execId, id, '4000000');
+    assert.equal(valid.status, 200);
+    assert.equal(valid.body.handled, true);
+    assert.equal(await bal(id), '4000000');
+  });
+
+  test('zero-amount deposit webhook does not block a later poll credit for the same execution', async () => {
+    const id = await newUser();
+    const execId = `exec_zero_poll_${id}`;
+
+    const zero = await postDepositWebhook(`evt_zero_p_${id}`, execId, id, '0');
+    assert.equal(zero.status, 200);
+    assert.equal(zero.body.handled, false);
+    assert.equal(await bal(id), '0');
+
+    depositExecutions = [pollExecution(execId, '4000000')];
+    const refreshed = await refreshDeposits(id);
+    assert.equal(refreshed.creditedUnits, '4000000'); // full credit, reference was never poisoned
+    assert.equal(await bal(id), '4000000');
+  });
+
+  test('webhook then poll converge on one execution id: credited exactly once', async () => {
+    const id = await newUser();
+    const execId = `exec_conv_wp_${id}`;
+
+    const wh = await postDepositWebhook(`evt_conv_wp_${id}`, execId, id, '4000000');
+    assert.equal(wh.status, 200);
+    assert.equal(wh.body.handled, true);
+    assert.equal(await bal(id), '4000000');
+
+    depositExecutions = [pollExecution(execId, '4000000')];
+    const refreshed = await refreshDeposits(id);
+    assert.equal(refreshed.creditedUnits, '0'); // no-op via shared deposit:<execId> reference
+    assert.equal(await bal(id), '4000000'); // not double-credited
+  });
+
+  test('poll then webhook converge on one execution id: credited exactly once', async () => {
+    const id = await newUser();
+    const execId = `exec_conv_pw_${id}`;
+
+    depositExecutions = [pollExecution(execId, '5000000')];
+    const refreshed = await refreshDeposits(id);
+    assert.equal(refreshed.creditedUnits, '5000000');
+    assert.equal(await bal(id), '5000000');
+
+    const wh = await postDepositWebhook(`evt_conv_pw_${id}`, execId, id, '5000000');
+    assert.equal(wh.status, 200);
+    assert.equal(wh.body.handled, true); // idempotent replay via the shared reference
+    assert.equal(await bal(id), '5000000'); // not double-credited
+  });
+
+  test('webhook and poll credit the same base-unit magnitude for the same raw amount', async () => {
+    const webhookUser = await newUser();
+    const pollUser = await newUser();
+    const amount = '7250000'; // $7.25 USDC in base units
+
+    const wh = await postDepositWebhook(
+      `evt_mag_${webhookUser}`,
+      `exec_mag_wh_${webhookUser}`,
+      webhookUser,
+      amount,
+    );
+    assert.equal(wh.status, 200);
+    assert.equal(wh.body.handled, true);
+
+    depositExecutions = [pollExecution(`exec_mag_poll_${pollUser}`, amount)];
+    const refreshed = await refreshDeposits(pollUser);
+    assert.equal(refreshed.creditedUnits, amount);
+
+    // Webhook details.destination_amount and poll destination_amount_base_unit
+    // carry the same base-unit integer string, so both paths credit identically.
+    assert.equal(await bal(webhookUser), amount);
+    assert.equal(await bal(pollUser), amount);
+  });
 });
 
 describe('flake-tax hangouts — staking + settlement', () => {
@@ -857,21 +1003,19 @@ describe('HTTP endpoints (supertest)', () => {
     assert.equal(res.body.address, '0xTREASURYADDR');
   });
 
-  test('POST /add-funds returns a deposit target (global fetch stubbed)', async () => {
+  test('POST /add-funds returns a deposit target (SDK stubbed)', async () => {
     const id = uid();
     await registerHttp(id);
 
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ data: [{ address: '0xDEPOSIT' }] }), {
-        status: 200,
-      })) as typeof fetch;
+    const origCreate = u.depositAddresses.create;
+    u.depositAddresses.create = async () => ({ data: [{ address: '0xDEPOSIT' }] });
     try {
       const res = await api.post('/add-funds').send({ externalUserId: id });
       assert.equal(res.status, 200);
       assert.equal(res.body.treasuryAddress, '0xTREASURYADDR');
+      assert.equal(res.body.depositAddresses[0].address, '0xDEPOSIT');
     } finally {
-      globalThis.fetch = origFetch;
+      u.depositAddresses.create = origCreate;
     }
   });
 
