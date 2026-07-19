@@ -7,12 +7,16 @@ const path = require('path');
 const fs = require('fs');
 
 const PORT = process.env.PORT || 4000;
-const DATA_DIR = path.join(__dirname, 'data');
+// DATA_DIR is overridable so hosted deploys can keep state outside the app dir
+// (on Azure App Service, /home/data survives redeploys while wwwroot does not).
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const db = new Database(path.join(DATA_DIR, 'tomoyard.sqlite'));
-db.pragma('journal_mode = WAL');
+// WAL needs shared memory and cannot work on network mounts (App Service /home);
+// set SQLITE_JOURNAL=delete there.
+db.pragma(`journal_mode = ${process.env.SQLITE_JOURNAL || 'WAL'}`);
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -123,6 +127,14 @@ const ACORNS_PER_LEVEL = 30;
 const app = express();
 app.use(express.json());
 app.use('/uploads', express.static(UPLOAD_DIR));
+// Marketing homepage (server/public) + APK download.
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/apk', (_req, res) => {
+  // CI drops the freshly built APK into DATA_DIR/apk (outside wwwroot).
+  const apk = path.join(DATA_DIR, 'apk', 'tomo-yard.apk');
+  if (!fs.existsSync(apk)) return res.status(404).json({ error: 'APK not built yet' });
+  res.download(apk, 'tomo-yard.apk');
+});
 
 const upload = multer({
   storage: multer.diskStorage({

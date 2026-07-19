@@ -28,6 +28,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./plugins/withTomoHce",
       "expo-font",
       [
         "expo-camera",
