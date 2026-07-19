@@ -52,8 +52,9 @@ resource "azurerm_linux_web_app" "app" {
   https_only          = true
 
   site_config {
-    always_on        = true
-    app_command_line = "node index.js"
+    always_on = true
+    # No custom app_command_line: Oryx's generated startup script must run —
+    # it extracts node_modules before launching `npm start` (node index.js).
     application_stack {
       node_version = "22-lts"
     }
