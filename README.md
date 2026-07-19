@@ -47,6 +47,27 @@ The app always talks to `https://ht6.icinoxis.net` (`DEFAULT_SERVER` in
 `src/state/session.tsx` — change it there for local development against
 `http://<your-ip>:4000`). There is no in-app server picker.
 
+## Crypto staking (flake-tax hangouts)
+
+Optional real-USDC staking on hangouts, gated on the main server's
+`CRYPTO_API_URL`. When set, a hangout can carry a stake: everyone puts in USDC,
+attendance is proven by the existing photo + phone-tap confirm, and on settle the
+no-shows' stakes are split among the friends who came. When `CRYPTO_API_URL` is
+unset (the current production deploy), staking simply does not appear and the app
+is unchanged.
+
+- Money runs on **Unifold** treasury-custody (Base/USDC), implemented in
+  `crypto/unifold-demo/server`. `server/crypto.js` is a thin proxy from the Tomo
+  Yard server to it, mapping username → `ty_<username>`.
+- Run it: `cd crypto/unifold-demo/server && npm install && cp .env.example .env`
+  (fill `UNIFOLD_SECRET_KEY`, `TREASURY_ACCOUNT_ID`), then `npm start` (:8787).
+  Start the main server with `CRYPTO_API_URL=http://localhost:8787`.
+- **Secrets never enter this repo.** The Unifold `sk_live_…` key lives only in
+  `crypto/unifold-demo/server/.env` (gitignored). For production it must be a
+  server-side env var on wherever the crypto service is hosted.
+- New users get a 4-USDC/month grant to play with; real deposits/withdrawals move
+  actual USDC at the edges (Deposit screen → Add funds / Cash out).
+
 ## Build the app
 
 ```bash
