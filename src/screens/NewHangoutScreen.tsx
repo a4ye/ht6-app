@@ -7,6 +7,7 @@ import OutlinedText from '../components/OutlinedText';
 import YardBackground from '../components/YardBackground';
 import TopBar from '../components/TopBar';
 import { bonusPreview } from '../bonus';
+import { fmtUsd, STAKE_PRESETS } from '../money';
 import { useNav } from '../state/nav';
 import { useSession } from '../state/session';
 import { C, F } from '../theme';
@@ -74,9 +75,12 @@ export default function NewHangoutScreen({ preselect }: { preselect?: string }) 
   const [hour, setHour] = useState(18);
   const [minute, setMinute] = useState(0);
   const [place, setPlace] = useState('');
+  const [stakeUnits, setStakeUnits] = useState<string | null>(null);
+  const [cryptoOn, setCryptoOn] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    api.wallet().then((w) => setCryptoOn(!!w.enabled)).catch(() => {});
     api.friends().then((r) => {
       setFriends(r.friends);
       // start with the nudged friend selected, once verified against the list
@@ -137,6 +141,7 @@ export default function NewHangoutScreen({ preselect }: { preselect?: string }) 
         date: when.toISOString(),
         place: place.trim() || 'Somewhere',
         friendUsernames: picked,
+        ...(stakeUnits ? { stakeUnits } : {}),
       });
       nav.replace({ name: 'hangoutDetail', hangoutId: hangout.id });
     } catch (e) {
@@ -379,6 +384,38 @@ export default function NewHangoutScreen({ preselect }: { preselect?: string }) 
               }}
             />
 
+            {cryptoOn && (
+              <>
+                <View style={{ marginTop: 14, marginBottom: 6 }}>
+                  <OutlinedText size={20} color={C.labelOrange} outline={C.white} thickness={2}>Stake?</OutlinedText>
+                </View>
+                <View style={{ flexDirection: 'row' }}>
+                  {STAKE_PRESETS.map((s) => {
+                    const on = stakeUnits === s.units;
+                    return (
+                      <Pressable key={s.label} onPress={() => setStakeUnits(s.units)} style={{ flex: 1 }}>
+                        <View
+                          style={{
+                            alignItems: 'center', marginHorizontal: 3, paddingVertical: 9, borderRadius: 6,
+                            backgroundColor: on ? C.yellow : C.white,
+                            borderWidth: 2.5, borderColor: on ? C.brown : '#C89A62',
+                          }}
+                        >
+                          <Text style={{ fontFamily: F.display, fontSize: 14, color: C.darkInk }}>{s.label}</Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {stakeUnits && (
+                  <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.brown, marginTop: 6 }}>
+                    Everyone puts in {fmtUsd(stakeUnits)}. Show up to get it back — whoever flakes loses
+                    their stake to the friends who came.
+                  </Text>
+                )}
+              </>
+            )}
+
             <View style={{ alignItems: 'center', marginTop: 14 }}>
               <Text style={{ fontFamily: F.body, fontSize: 13, color: C.brown, textAlign: 'center' }}>
                 {timeMode === 'now'
@@ -386,6 +423,7 @@ export default function NewHangoutScreen({ preselect }: { preselect?: string }) 
                   : date.toLocaleDateString(undefined, {
                       weekday: 'short', month: 'short', day: 'numeric',
                     }) + ' at ' + fmtClock(date.getHours(), date.getMinutes())}
+                {stakeUnits ? ` · ${fmtUsd(stakeUnits)} stake` : ''}
               </Text>
             </View>
 
