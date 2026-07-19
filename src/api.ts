@@ -1,6 +1,6 @@
 import { FileSystemUploadType, uploadAsync } from 'expo-file-system/legacy';
 import {
-  Activity, FriendProfile, FriendView, Hangout, Holiday, Me, PublicUser, WardrobeItem,
+  Activity, FriendCard, FriendProfile, FriendView, Hangout, Holiday, Me, PublicUser, Suggestion, WardrobeItem,
 } from './types';
 
 export class ApiError extends Error {
@@ -71,6 +71,10 @@ export function makeApi(serverUrl: string, token: string | null) {
       call<{ ok: boolean; accepted: boolean }>(serverUrl, token, 'POST', '/friends/request', { username }),
     acceptFriend: (username: string) =>
       call<{ ok: boolean }>(serverUrl, token, 'POST', '/friends/accept', { username }),
+    friendCard: (username: string) =>
+      call<{ card: FriendCard }>(serverUrl, token, 'GET', `/friends/${encodeURIComponent(username)}/card`),
+    suggestion: () =>
+      call<{ suggestion: Suggestion | null }>(serverUrl, token, 'GET', '/suggestions'),
     rankedActivities: (withUsernames: string[]) =>
       call<{ activities: Activity[] }>(
         serverUrl, token, 'GET', `/activities/ranked?with=${withUsernames.join(',')}`),
