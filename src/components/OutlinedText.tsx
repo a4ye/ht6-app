@@ -13,8 +13,8 @@ type Props = {
   textAlign?: TextStyle['textAlign'];
 };
 
-// Neko Atsume-style chunky lettering: RN has no text stroke, so we stack
-// offset copies of the text behind the fill to fake a hand-inked outline.
+// Pixel-style heading: a single chunky drop-shadow copy behind the fill,
+// like the Sprout Lands UI lettering.
 export default function OutlinedText({
   children,
   size = 26,
@@ -25,11 +25,7 @@ export default function OutlinedText({
   style,
   textAlign,
 }: Props) {
-  const t = thickness;
-  const offsets: [number, number][] = [
-    [-t, 0], [t, 0], [0, -t], [0, t],
-    [-t, -t], [t, -t], [-t, t], [t, t],
-  ];
+  const off = Math.max(2, Math.round(thickness * 1.2));
   const base: TextStyle = {
     fontFamily: font,
     fontSize: size,
@@ -39,15 +35,12 @@ export default function OutlinedText({
   };
   return (
     <View style={style}>
-      {offsets.map(([x, y], i) => (
-        <Text
-          key={i}
-          allowFontScaling={false}
-          style={[base, { color: outline, position: 'absolute', left: x, top: y, right: -x }]}
-        >
-          {children}
-        </Text>
-      ))}
+      <Text
+        allowFontScaling={false}
+        style={[base, { color: outline, position: 'absolute', left: off, top: off, right: -off }]}
+      >
+        {children}
+      </Text>
       <Text allowFontScaling={false} style={[base, { color }]}>
         {children}
       </Text>

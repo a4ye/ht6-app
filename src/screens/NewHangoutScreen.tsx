@@ -137,12 +137,12 @@ export default function NewHangoutScreen() {
                   <Pressable key={f.username} onPress={() => toggle(f.username)}>
                     <View
                       style={{
-                        alignItems: 'center', margin: 4, padding: 8, borderRadius: 16, width: 90,
+                        alignItems: 'center', margin: 4, padding: 8, borderRadius: 6, width: 90,
                         backgroundColor: on ? C.yellow : C.cream,
-                        borderWidth: 3, borderColor: on ? C.brown : '#D8C89A',
+                        borderWidth: 3, borderColor: on ? C.brown : '#C89A62',
                       }}
                     >
-                      <Avatar color={f.color} equipped={f.equipped} size={50} />
+                      <Avatar color={f.color} species={f.species} equipped={f.equipped} size={50} />
                       <Text style={{ fontFamily: F.display, fontSize: 13, color: C.darkInk }} numberOfLines={1}>
                         {f.name}
                       </Text>
@@ -226,9 +226,9 @@ export default function NewHangoutScreen() {
                 <Pressable key={d} onPress={() => setDaysAhead(d)}>
                   <View
                     style={{
-                      paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, margin: 3,
+                      paddingHorizontal: 12, paddingVertical: 7, borderRadius: 6, margin: 3,
                       backgroundColor: daysAhead === d ? C.yellow : C.white,
-                      borderWidth: 2.5, borderColor: daysAhead === d ? C.brown : '#CBD8A0',
+                      borderWidth: 2.5, borderColor: daysAhead === d ? C.brown : '#C89A62',
                     }}
                   >
                     <Text style={{ fontFamily: F.display, fontSize: 13, color: C.darkInk }}>
@@ -243,9 +243,9 @@ export default function NewHangoutScreen() {
                 <Pressable key={t.hour} onPress={() => setHour(t.hour)}>
                   <View
                     style={{
-                      paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12, margin: 3,
+                      paddingHorizontal: 12, paddingVertical: 7, borderRadius: 6, margin: 3,
                       backgroundColor: hour === t.hour ? C.yellow : C.white,
-                      borderWidth: 2.5, borderColor: hour === t.hour ? C.brown : '#CBD8A0',
+                      borderWidth: 2.5, borderColor: hour === t.hour ? C.brown : '#C89A62',
                     }}
                   >
                     <Text style={{ fontFamily: F.display, fontSize: 13, color: C.darkInk }}>{t.label}</Text>
@@ -268,7 +268,7 @@ export default function NewHangoutScreen() {
               placeholder="Name a spot"
               placeholderTextColor={C.fadedInk}
               style={{
-                backgroundColor: C.white, borderWidth: 2.5, borderColor: '#CBD8A0', borderRadius: 12,
+                backgroundColor: C.white, borderWidth: 2.5, borderColor: '#C89A62', borderRadius: 6,
                 paddingHorizontal: 12, paddingVertical: 9, fontFamily: F.body, fontSize: 15, color: C.darkInk,
               }}
             />

@@ -19,7 +19,7 @@ function VibeBar({ f }: { f: FriendView }) {
       <View
         style={{
           flex: 1, height: 10, backgroundColor: C.white, borderWidth: 2,
-          borderColor: '#E0C48E', borderRadius: 6, overflow: 'hidden',
+          borderColor: '#C89A62', borderRadius: 2, overflow: 'hidden',
         }}
       >
         <View
@@ -125,8 +125,8 @@ export default function FriendsScreen() {
             placeholder="Search username or name"
             placeholderTextColor={C.fadedInk}
             style={{
-              backgroundColor: C.white, borderWidth: 2.5, borderColor: '#F3C3CD',
-              borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9,
+              backgroundColor: C.white, borderWidth: 2.5, borderColor: '#C89A62',
+              borderRadius: 6, paddingHorizontal: 12, paddingVertical: 9,
               fontFamily: F.body, fontSize: 15, color: C.darkInk,
             }}
           />
@@ -135,7 +135,7 @@ export default function FriendsScreen() {
               key={u.username}
               style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}
             >
-              <Avatar color={u.color} equipped={u.equipped} size={44} />
+              <Avatar color={u.color} species={u.species} equipped={u.equipped} size={44} />
               <View style={{ flex: 1, marginLeft: 10 }}>
                 <Text style={{ fontFamily: F.display, fontSize: 15, color: C.darkInk }}>{u.name}</Text>
                 <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.fadedInk }}>@{u.username}</Text>
@@ -157,7 +157,7 @@ export default function FriendsScreen() {
             </View>
             {incoming.map((f, i) => (
               <DoodleCard key={f.username} seed={i * 3 + 30} style={{ marginBottom: 10, flexDirection: 'row', alignItems: 'center' }}>
-                <Avatar color={f.color} equipped={f.equipped} size={46} />
+                <Avatar color={f.color} species={f.species} equipped={f.equipped} size={46} />
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={{ fontFamily: F.display, fontSize: 15, color: C.darkInk }}>{f.name}</Text>
                   <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.fadedInk }}>@{f.username}</Text>
@@ -182,7 +182,7 @@ export default function FriendsScreen() {
         {friends.map((f, i) => (
           <DoodleCard key={f.username} seed={i * 5 + 50} tilt={0.5} style={{ marginBottom: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Avatar color={f.color} equipped={f.equipped} size={54} />
+              <Avatar color={f.color} species={f.species} equipped={f.equipped} size={54} />
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                   <Text style={{ fontFamily: F.display, fontSize: 16, color: C.darkInk }}>{f.name}</Text>

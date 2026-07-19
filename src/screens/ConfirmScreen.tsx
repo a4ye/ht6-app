@@ -4,11 +4,13 @@ import { Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { DoodleButton, DoodleCard } from '../components/Doodle';
+import { DoodleButton } from '../components/Doodle';
 import OutlinedText from '../components/OutlinedText';
 import YardBackground from '../components/YardBackground';
 import TopBar from '../components/TopBar';
-import { cancelScan, nfcAvailable, scanOnce, startShowing, stopShowing } from '../nfc';
+import {
+  cancelScan, lastTapAt, nfcState, scanOnce, startShowing, stopShowing,
+} from '../nfc';
 import { useNav } from '../state/nav';
 import { useSession } from '../state/session';
 import { C, F } from '../theme';
@@ -40,19 +42,25 @@ export default function ConfirmScreen({
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>('pick');
   const [status, setStatus] = useState<string | null>(null);
+  const [nfcNote, setNfcNote] = useState<string | null>(null);
   const [payload, setPayload] = useState<string | null>(null);
   const [hceOn, setHceOn] = useState(false);
-  const [nfcOn, setNfcOn] = useState(false);
+  const [nfc, setNfc] = useState({ supported: false, enabled: false });
+  const [tapSeen, setTapSeen] = useState(false);
   const [result, setResult] = useState<{ vibeGain: number; acornGain: number; bonusReason: string | null } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tapPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const handled = useRef(false);
+  const armed = useRef(false);
 
   useEffect(() => {
-    nfcAvailable().then(setNfcOn);
+    nfcState().then(setNfc);
     return () => {
+      armed.current = false;
       stopShowing().catch(() => {});
       cancelScan().catch(() => {});
       if (pollRef.current) clearInterval(pollRef.current);
+      if (tapPollRef.current) clearInterval(tapPollRef.current);
     };
   }, []);
 
@@ -61,14 +69,22 @@ export default function ConfirmScreen({
     return hangout.confirmedPairs.some(([x, y]) => x === otherUsername || y === otherUsername);
   }, [api, hangoutId, otherUsername]);
 
-  // ---- show side: QR always, NFC too when the hardware can ----
+  // ---- show side: QR always, NFC too when the hardware allows it ----
   const show = async () => {
     setStatus(null);
     try {
       const { payload: p } = await api.nfcToken(hangoutId);
       setPayload(p);
-      setHceOn(await startShowing(p));
+      const on = await startShowing(p);
+      setHceOn(on);
       setPhase('showing');
+      const showStart = Date.now();
+      if (on) {
+        tapPollRef.current = setInterval(async () => {
+          const t = await lastTapAt();
+          if (t > showStart) setTapSeen(true);
+        }, 1000);
+      }
       pollRef.current = setInterval(async () => {
         try {
           if (await isConfirmedWithOther()) {
@@ -86,7 +102,7 @@ export default function ConfirmScreen({
     }
   };
 
-  // ---- scan side: camera reads the QR; NFC listens too when available ----
+  // ---- scan side ----
   const handlePayload = useCallback(async (raw: string) => {
     if (handled.current) return;
     handled.current = true;
@@ -96,6 +112,7 @@ export default function ConfirmScreen({
       if (Number(parts[1]) !== hangoutId) throw new Error('That code is for a different hangout');
       if (parts[2] !== otherUsername) throw new Error(`That code belongs to @${parts[2]}, not @${otherUsername}`);
       const r = await api.confirm(hangoutId, parts[2], parts[3]);
+      armed.current = false;
       await cancelScan();
       setResult({ vibeGain: r.vibeGain, acornGain: r.acornGain, bonusReason: r.bonusReason });
       setPhase('done');
@@ -108,6 +125,34 @@ export default function ConfirmScreen({
     }
   }, [api, hangoutId, otherUsername]);
 
+  // keep the NFC reader armed while scanning; surface every failure
+  const armNfcLoop = useCallback(async () => {
+    const s = await nfcState();
+    if (!s.supported) {
+      setNfcNote('This phone has no NFC. Use the camera on their code.');
+      return;
+    }
+    if (!s.enabled) {
+      setNfcNote('NFC is turned off in your phone settings. Turn it on, or use the camera.');
+      return;
+    }
+    armed.current = true;
+    setNfcNote('NFC is listening. Touch the phones back to back, slowly.');
+    while (armed.current && !handled.current) {
+      try {
+        const p = await scanOnce();
+        if (!armed.current) break;
+        await handlePayload(p);
+        break;
+      } catch (e) {
+        if (!armed.current) break;
+        const msg = e instanceof Error && e.message ? e.message : 'no contact yet';
+        setNfcNote(`NFC: ${msg}. Still listening.`);
+        await new Promise((r) => setTimeout(r, 800));
+      }
+    }
+  }, [handlePayload]);
+
   const scan = async () => {
     setStatus(null);
     handled.current = false;
@@ -119,10 +164,7 @@ export default function ConfirmScreen({
       }
     }
     setPhase('scanning');
-    if (await nfcAvailable()) {
-      // race the NFC reader alongside the camera; first source wins
-      scanOnce().then(handlePayload).catch(() => {});
-    }
+    armNfcLoop();
   };
 
   return (
@@ -134,7 +176,7 @@ export default function ConfirmScreen({
 
       <View style={{ flex: 1, padding: 20, alignItems: 'center' }}>
         {phase !== 'scanning' && <PhonesTouching size={130} />}
-        <Text style={{ fontFamily: F.display, fontSize: 17, color: C.darkInk, marginTop: 6, textAlign: 'center' }}>
+        <Text style={{ fontFamily: F.display, fontSize: 15, color: C.darkInk, marginTop: 6, textAlign: 'center' }}>
           You and {otherName}
         </Text>
 
@@ -142,8 +184,13 @@ export default function ConfirmScreen({
           <>
             <Text style={{ fontFamily: F.body, fontSize: 14, color: C.brown, marginTop: 6, textAlign: 'center' }}>
               Prove you are really together. One of you shows a code, the other scans it.
-              {nfcOn ? ' Tapping phones works too.' : ''}
+              {nfc.enabled ? ' Tapping phones works too.' : ''}
             </Text>
+            {nfc.supported && !nfc.enabled && (
+              <Text style={{ fontFamily: F.body, fontSize: 13, color: C.redPin, marginTop: 6, textAlign: 'center' }}>
+                NFC is turned off in your phone settings, so only the camera will work.
+              </Text>
+            )}
             <View style={{ marginTop: 18, width: '100%' }}>
               <DoodleButton label="Show my code" seed={5} bg={C.yellow} border={C.brown} onPress={show} />
               <View style={{ height: 10 }} />
@@ -162,15 +209,25 @@ export default function ConfirmScreen({
             <View
               style={{
                 backgroundColor: C.white, borderWidth: 3, borderColor: C.darkInk,
-                borderRadius: 12, padding: 14,
+                borderRadius: 6, padding: 14,
               }}
             >
               <QRCode value={payload} size={214} color={C.darkInk} backgroundColor={C.white} />
             </View>
             <Text style={{ fontFamily: F.body, fontSize: 13.5, color: C.brown, marginTop: 12, textAlign: 'center' }}>
-              Have {otherName} scan this{hceOn ? ', or just tap your phones together' : ''}.
+              Have {otherName} scan this{hceOn ? ', or touch your phones back to back' : ''}.
               This screen will notice when it works.
             </Text>
+            {tapSeen && (
+              <Text style={{ fontFamily: F.display, fontSize: 13.5, color: C.labelGreen, marginTop: 8, textAlign: 'center' }}>
+                Phones touched! Waiting for their phone to finish.
+              </Text>
+            )}
+            {!hceOn && nfc.supported && (
+              <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.fadedInk, marginTop: 6, textAlign: 'center' }}>
+                Phone tapping is unavailable on this phone, the code still works.
+              </Text>
+            )}
           </View>
         )}
 
@@ -179,7 +236,7 @@ export default function ConfirmScreen({
             <View
               style={{
                 width: '92%', aspectRatio: 1, borderWidth: 3, borderColor: C.darkInk,
-                borderRadius: 12, overflow: 'hidden', backgroundColor: '#EFE8D8', marginTop: 12,
+                borderRadius: 6, overflow: 'hidden', backgroundColor: '#EFE8D8', marginTop: 12,
               }}
             >
               {permission?.granted && (
@@ -192,8 +249,13 @@ export default function ConfirmScreen({
               )}
             </View>
             <Text style={{ fontFamily: F.body, fontSize: 13.5, color: C.brown, marginTop: 10, textAlign: 'center' }}>
-              Point the camera at {otherName}'s code{nfcOn ? ', or touch your phones back to back' : ''}.
+              Point the camera at {otherName}'s code.
             </Text>
+            {nfcNote && (
+              <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.fadedInk, marginTop: 6, textAlign: 'center' }}>
+                {nfcNote}
+              </Text>
+            )}
             {status && (
               <Text style={{ fontFamily: F.body, fontSize: 13.5, color: C.redPin, marginTop: 8, textAlign: 'center' }}>
                 {status}
@@ -204,7 +266,7 @@ export default function ConfirmScreen({
 
         {phase === 'done' && (
           <View style={{ alignItems: 'center', marginTop: 16 }}>
-            <OutlinedText size={30} color={C.yellow} outline={C.darkInk} thickness={2.5}>
+            <OutlinedText size={28} color={C.yellow} outline={C.darkInk} thickness={2.5}>
               Confirmed!
             </OutlinedText>
             {result && result.vibeGain > 0 && (

@@ -38,8 +38,8 @@ export const C = {
 } as const;
 
 export const F = {
-  display: 'Baloo2_800ExtraBold',
-  displayMed: 'Baloo2_700Bold',
+  display: 'SproutPixel',
+  displayMed: 'SproutPixel',
   body: 'Delius_400Regular',
 } as const;
 
@@ -51,16 +51,16 @@ export function wob(seed: number): number {
   return x - Math.floor(x);
 }
 
-// Slightly irregular corner radii so rectangles feel hand-drawn.
-export function doodleCorners(seed: number, base = 18) {
+// Crisp pixel-style corners (Sprout Lands UI uses squared chunky panels).
+export function doodleCorners(_seed: number, _base = 18) {
   return {
-    borderTopLeftRadius: base + Math.round(wob(seed) * 8),
-    borderTopRightRadius: base + Math.round(wob(seed + 1) * 8),
-    borderBottomRightRadius: base + Math.round(wob(seed + 2) * 8),
-    borderBottomLeftRadius: base + Math.round(wob(seed + 3) * 8),
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    borderBottomRightRadius: 6,
+    borderBottomLeftRadius: 6,
   };
 }
 
-export function doodleTilt(seed: number, maxDeg = 1.6) {
-  return { transform: [{ rotate: `${(wob(seed) * 2 - 1) * maxDeg}deg` }] };
+export function doodleTilt(_seed: number, _maxDeg = 1.6) {
+  return { transform: [{ rotate: '0deg' }] };
 }

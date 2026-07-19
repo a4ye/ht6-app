@@ -35,7 +35,7 @@ export default function ProfileScreen() {
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
         <DoodleCard seed={2} style={{ alignItems: 'center' }}>
-          <Avatar color={me.color} equipped={me.equipped} size={140} />
+          <Avatar color={me.color} species={me.species} equipped={me.equipped} size={140} />
           <Text style={{ fontFamily: F.display, fontSize: 22, color: C.darkInk, marginTop: 4 }}>
             {me.name}
           </Text>

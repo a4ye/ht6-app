@@ -2,6 +2,7 @@ export type PublicUser = {
   username: string;
   name: string;
   color: string;
+  species: string;
   equipped: string[];
 };
 

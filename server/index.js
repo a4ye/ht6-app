@@ -79,6 +79,14 @@ CREATE TABLE IF NOT EXISTS nfc_tokens (
 );
 `);
 
+const SPECIES = ['cat', 'bear', 'bunny', 'frog', 'duck'];
+// existing databases get the new column on startup
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN species TEXT NOT NULL DEFAULT 'cat'`);
+} catch {
+  // column already exists
+}
+
 const ACTIVITIES = [
   { id: 'ramen', label: 'Ramen' },
   { id: 'karaoke', label: 'Karaoke' },
@@ -147,6 +155,7 @@ function publicUser(u) {
     username: u.username,
     name: u.name,
     color: u.color,
+    species: u.species,
     equipped: JSON.parse(u.equipped),
   };
 }
@@ -233,7 +242,7 @@ function maybeComplete(hangoutId) {
 
 // ---------- auth ----------
 app.post('/auth/register', (req, res) => {
-  const { username, name, birthday, password, color } = req.body || {};
+  const { username, name, birthday, password, color, species } = req.body || {};
   if (!/^[a-z0-9_]{3,20}$/.test(username || ''))
     return res.status(400).json({ error: 'Username must be 3-20 chars: a-z, 0-9, _' });
   if (!name || name.length < 1 || name.length > 40)
@@ -246,9 +255,10 @@ app.post('/auth/register', (req, res) => {
     return res.status(409).json({ error: 'Username is taken' });
   const salt = crypto.randomBytes(8).toString('hex');
   const token = newToken();
-  db.prepare(`INSERT INTO users (username, name, birthday, pass_hash, salt, token, color, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(username, name, birthday, hash(password, salt), salt, token, color || '#A8D8C8', now());
+  db.prepare(`INSERT INTO users (username, name, birthday, pass_hash, salt, token, color, species, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(username, name, birthday, hash(password, salt), salt, token, color || '#A8D8C8',
+      SPECIES.includes(species) ? species : 'cat', now());
   const u = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   res.json({ token, me: meView(u) });
 });
@@ -268,6 +278,7 @@ function meView(u) {
     birthday: u.birthday,
     acorns: u.acorns,
     color: u.color,
+    species: u.species,
     owned: JSON.parse(u.owned),
     equipped: JSON.parse(u.equipped),
   };
@@ -276,11 +287,12 @@ function meView(u) {
 app.get('/me', auth, (req, res) => res.json({ me: meView(req.user) }));
 
 app.put('/me/avatar', auth, (req, res) => {
-  const { color, equipped } = req.body || {};
+  const { color, equipped, species } = req.body || {};
   const owned = JSON.parse(req.user.owned);
   const eq = Array.isArray(equipped) ? equipped.filter((i) => owned.includes(i)) : [];
-  db.prepare('UPDATE users SET color = ?, equipped = ? WHERE id = ?')
-    .run(color || req.user.color, JSON.stringify(eq), req.user.id);
+  db.prepare('UPDATE users SET color = ?, equipped = ?, species = ? WHERE id = ?')
+    .run(color || req.user.color, JSON.stringify(eq),
+      SPECIES.includes(species) ? species : req.user.species, req.user.id);
   res.json({ me: meView(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)) });
 });
 

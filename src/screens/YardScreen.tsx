@@ -12,7 +12,8 @@ import YardScene from '../components/YardScene';
 import { bonusPreview } from '../bonus';
 import { useNav } from '../state/nav';
 import { useSession } from '../state/session';
-import { C, F, doodleCorners, wob } from '../theme';
+import { BTN_CREAM, NineSliceBg } from '../components/PixelUI';
+import { C, F, wob } from '../theme';
 import { FriendView, Hangout, Holiday } from '../types';
 import MenuOverlay from './MenuOverlay';
 
@@ -36,7 +37,7 @@ function BobbingAvatar({
   return (
     <Pressable onPress={onPress}>
       <Animated.View style={{ transform: [{ translateY: y }], alignItems: 'center' }}>
-        <Avatar color={friend.color} equipped={friend.equipped} size={size} />
+        <Avatar color={friend.color} species={friend.species} equipped={friend.equipped} size={size} />
         <View style={{ marginTop: -6 }}>
           <OutlinedText size={13} color={C.white} outline={C.darkInk} thickness={1.5}>
             {friend.name}
@@ -95,14 +96,6 @@ export default function YardScreen() {
     <View style={{ flex: 1 }}>
       <YardBackground bg={C.tan} tint={C.tanPaw} seed={3} />
 
-      {/* grass */}
-      <View
-        style={{
-          position: 'absolute', left: -30, right: -30, bottom: -40, top: height * 0.38,
-          backgroundColor: '#BFD98A', borderTopLeftRadius: 180, borderTopRightRadius: 140,
-          borderWidth: 3, borderColor: C.brown,
-        }}
-      />
       <YardScene />
 
       {friends.length === 0 ? (
@@ -118,7 +111,7 @@ export default function YardScreen() {
               <View
                 style={{
                   backgroundColor: C.yellow, borderWidth: 3, borderColor: C.brown,
-                  borderRadius: 14, paddingVertical: 8, paddingHorizontal: 18,
+                  borderRadius: 6, paddingVertical: 8, paddingHorizontal: 18,
                 }}
               >
                 <Text style={{ fontFamily: F.display, fontSize: 14, color: C.darkInk }}>Find friends</Text>
@@ -146,11 +139,11 @@ export default function YardScreen() {
             <View
               style={{
                 flexDirection: 'row', alignItems: 'center', backgroundColor: C.cream,
-                borderWidth: 3, borderColor: C.brown, borderRadius: 18,
+                borderWidth: 2.5, borderColor: '#C89A62', borderRadius: 6,
                 paddingVertical: 3, paddingHorizontal: 10,
               }}
             >
-              <Avatar color={me?.color ?? '#A8D8C8'} equipped={me?.equipped} size={34} />
+              <Avatar color={me?.color ?? '#A8D8C8'} species={me?.species} equipped={me?.equipped} size={34} />
               <Text style={{ fontFamily: F.display, fontSize: 15, color: C.brown, marginLeft: 6 }}>
                 {me?.name ?? ''}
               </Text>
@@ -203,20 +196,17 @@ export default function YardScreen() {
         style={{ position: 'absolute', right: 16, bottom: insets.bottom + 18 }}
       >
         <View
-          style={[
-            {
-              backgroundColor: C.cream, borderWidth: 3, borderColor: C.brown,
-              width: 72, height: 72, alignItems: 'center', justifyContent: 'center',
-            },
-            doodleCorners(33, 18),
-          ]}
+          style={{
+            width: 72, height: 72, alignItems: 'center', justifyContent: 'center',
+          }}
         >
+          <NineSliceBg set={BTN_CREAM} corner={13} />
           <View style={{ width: 26 }}>
             {[0, 1, 2].map((i) => (
-              <View key={i} style={{ height: 3.5, backgroundColor: C.orange, borderRadius: 2, marginVertical: 2.5 }} />
+              <View key={i} style={{ height: 4, backgroundColor: '#C89A62', marginVertical: 2.5 }} />
             ))}
           </View>
-          <Text style={{ fontFamily: F.display, fontSize: 13, color: C.brown, includeFontPadding: false }}>Menu</Text>
+          <Text style={{ fontFamily: F.display, fontSize: 11, color: C.brown, includeFontPadding: false, marginTop: 3 }}>Menu</Text>
         </View>
       </Pressable>
 

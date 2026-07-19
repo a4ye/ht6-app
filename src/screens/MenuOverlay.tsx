@@ -1,8 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { DoodleButton } from '../components/Doodle';
 import { useNav } from '../state/nav';
-import { C, F, doodleCorners } from '../theme';
 import { Route } from '../types';
 
 const ITEMS: { label: string; route: Route }[] = [
@@ -44,27 +44,15 @@ export default function MenuOverlay({ onClose }: { onClose: () => void }) {
               marginTop: 8,
             }}
           >
-            <Pressable
+            <DoodleButton
+              label={item.label}
+              size={15}
               onPress={() => {
                 onClose();
                 nav.push(item.route);
               }}
-            >
-              <View
-                style={[
-                  {
-                    backgroundColor: C.cream, borderWidth: 3, borderColor: C.brown,
-                    alignItems: 'center',
-                    paddingVertical: 11, paddingHorizontal: 14, minWidth: 185,
-                  },
-                  doodleCorners(i * 4 + 2, 15),
-                ]}
-              >
-                <Text style={{ fontFamily: F.display, fontSize: 17, color: C.brown, includeFontPadding: false }}>
-                  {item.label}
-                </Text>
-              </View>
-            </Pressable>
+              style={{ minWidth: 185 }}
+            />
           </Animated.View>
         ))}
       </View>

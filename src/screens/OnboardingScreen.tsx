@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { makeApi } from '../api';
-import Avatar from '../components/Avatar';
+import Avatar, { SPECIES } from '../components/Avatar';
 import { DoodleButton, DoodleCard } from '../components/Doodle';
 import OutlinedText from '../components/OutlinedText';
 import YardBackground from '../components/YardBackground';
@@ -16,8 +16,8 @@ const COLORS = ['#A8D8C8', '#F5B8A0', '#C9B8E8', '#A0C8E8', '#F0D890', '#F0B8D0'
 const inputStyle = {
   backgroundColor: C.white,
   borderWidth: 2.5,
-  borderColor: '#E0C48E',
-  borderRadius: 12,
+  borderColor: '#C89A62',
+  borderRadius: 6,
   paddingHorizontal: 12,
   paddingVertical: 9,
   fontFamily: F.body,
@@ -43,6 +43,7 @@ export default function OnboardingScreen() {
   const [bd, setBd] = useState({ y: '', m: '', d: '' });
   const [password, setPassword] = useState('');
   const [color, setColor] = useState(COLORS[0]);
+  const [species, setSpecies] = useState<string>('cat');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +61,7 @@ export default function OnboardingScreen() {
           birthday,
           password,
           color,
+          species,
         });
         signIn(url, res.token, res.me);
       } else {
@@ -98,10 +100,10 @@ export default function OnboardingScreen() {
               <Pressable key={m} onPress={() => setMode(m)} style={{ flex: 1 }}>
                 <View
                   style={{
-                    paddingVertical: 8, alignItems: 'center', borderRadius: 12,
+                    paddingVertical: 8, alignItems: 'center', borderRadius: 6,
                     marginHorizontal: 3,
                     backgroundColor: mode === m ? C.yellow : C.white,
-                    borderWidth: 2.5, borderColor: mode === m ? C.brown : '#E0C48E',
+                    borderWidth: 2.5, borderColor: mode === m ? C.brown : '#C89A62',
                   }}
                 >
                   <Text style={{ fontFamily: F.display, fontSize: 14, color: C.darkInk }}>
@@ -158,15 +160,30 @@ export default function OnboardingScreen() {
           {mode === 'register' && (
             <>
               <Label>Your look</Label>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Avatar color={color} size={74} />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }}>
+                {SPECIES.map((s) => (
+                  <Pressable key={s} onPress={() => setSpecies(s)}>
+                    <View
+                      style={{
+                        alignItems: 'center', margin: 3, padding: 4, borderRadius: 6,
+                        backgroundColor: species === s ? C.yellow : C.white,
+                        borderWidth: 2.5, borderColor: species === s ? C.brown : '#C89A62',
+                      }}
+                    >
+                      <Avatar color={color} species={s} size={52} />
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                <Avatar color={color} species={species} size={74} />
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', flex: 1, marginLeft: 10 }}>
                   {COLORS.map((c) => (
                     <Pressable key={c} onPress={() => setColor(c)}>
                       <View
                         style={{
-                          width: 34, height: 34, borderRadius: 17, margin: 4, backgroundColor: c,
-                          borderWidth: 3, borderColor: color === c ? C.darkInk : '#E0C48E',
+                          width: 34, height: 34, borderRadius: 6, margin: 4, backgroundColor: c,
+                          borderWidth: 3, borderColor: color === c ? C.darkInk : '#C89A62',
                         }}
                       />
                     </Pressable>

@@ -33,7 +33,7 @@ function HangoutCard({ h, seed, onOpen }: { h: Hangout; seed: number; onOpen: ()
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
           {h.members.map((m) => (
             <View key={m.username} style={{ marginRight: 2 }}>
-              <Avatar color={m.color} equipped={m.equipped} size={30} />
+              <Avatar color={m.color} species={m.species} equipped={m.equipped} size={30} />
             </View>
           ))}
           <View style={{ flex: 1 }} />

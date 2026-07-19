@@ -39,3 +39,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# local server state (db + user photos): never commit
+server/data/
+
+# build artifact, served by CI instead
+tomo-yard.apk
+src/.Rhistory

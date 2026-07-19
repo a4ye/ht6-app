@@ -1,14 +1,19 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { Animated, Pressable, Text, View, ViewStyle } from 'react-native';
-import { C, F, doodleCorners, doodleTilt } from '../theme';
+import { C, F } from '../theme';
+import {
+  BTN_CREAM, BTN_CREAM_PRESSED, BTN_TAN, BTN_TAN_PRESSED,
+  NineSliceBg, PANEL_CREAM, PANEL_TAN,
+} from './PixelUI';
 
-// ---- DoodleCard: cream card with wobbly corners + hand-inked border ----
+// ---- DoodleCard: Sprout Lands 9-slice panel ----
+// bg other than the default cream renders on the tan "highlight" panel.
 export function DoodleCard({
   children,
-  seed = 1,
-  tilt = 0,
+  seed: _seed = 1,
+  tilt: _tilt = 0,
   bg = C.cream,
-  border = C.brown,
+  border: _border = C.brown,
   style,
 }: {
   children?: React.ReactNode;
@@ -18,35 +23,25 @@ export function DoodleCard({
   border?: string;
   style?: ViewStyle | ViewStyle[];
 }) {
+  const set = bg === C.cream ? PANEL_CREAM : PANEL_TAN;
   return (
-    <View
-      style={[
-        {
-          backgroundColor: bg,
-          borderWidth: 3,
-          borderColor: border,
-          padding: 14,
-        },
-        doodleCorners(seed),
-        tilt ? doodleTilt(seed, tilt) : null,
-        style as ViewStyle,
-      ]}
-    >
+    <View style={[{ padding: 16, minHeight: 34 }, style as ViewStyle]}>
+      <NineSliceBg set={set} corner={15} />
       {children}
     </View>
   );
 }
 
-// ---- DoodleButton: springy hand-drawn button ----
+// ---- DoodleButton: Sprout Lands sprite button with a pressed state ----
 export function DoodleButton({
   label,
-  icon,
+  icon: _icon,
   onPress,
-  seed = 7,
+  seed: _seed = 7,
   bg = C.white,
-  border = C.orange,
+  border: _border = C.orange,
   color = C.brown,
-  size = 17,
+  size = 15,
   disabled = false,
   style,
 }: {
@@ -61,36 +56,42 @@ export function DoodleButton({
   disabled?: boolean;
   style?: ViewStyle | ViewStyle[];
 }) {
+  const [pressed, setPressed] = useState(false);
   const scale = useRef(new Animated.Value(1)).current;
   const springTo = (v: number) =>
-    Animated.spring(scale, { toValue: v, useNativeDriver: true, speed: 40, bounciness: 12 }).start();
+    Animated.spring(scale, { toValue: v, useNativeDriver: true, speed: 40, bounciness: 10 }).start();
+  const primary = bg === C.yellow;
+  const set = primary
+    ? pressed ? BTN_TAN_PRESSED : BTN_TAN
+    : pressed ? BTN_CREAM_PRESSED : BTN_CREAM;
   return (
     <Pressable
       disabled={disabled}
-      onPressIn={() => springTo(0.92)}
-      onPressOut={() => springTo(1)}
+      onPressIn={() => {
+        setPressed(true);
+        springTo(0.95);
+      }}
+      onPressOut={() => {
+        setPressed(false);
+        springTo(1);
+      }}
       onPress={onPress}
     >
       <Animated.View
         style={[
           {
-            backgroundColor: disabled ? '#E8DDC2' : bg,
-            borderWidth: 3,
-            borderColor: disabled ? C.fadedInk : border,
-            paddingVertical: 9,
-            paddingHorizontal: 16,
-            flexDirection: 'row',
+            paddingVertical: 11,
+            paddingHorizontal: 18,
+            minHeight: 40,
             alignItems: 'center',
             justifyContent: 'center',
+            opacity: disabled ? 0.45 : 1,
             transform: [{ scale }],
           },
-          doodleCorners(seed, 14),
           style as ViewStyle,
         ]}
       >
-        {icon ? (
-          <Text allowFontScaling={false} style={{ fontSize: size + 2, marginRight: 7 }}>{icon}</Text>
-        ) : null}
+        <NineSliceBg set={set} corner={12} />
         <Text
           allowFontScaling={false}
           style={{
@@ -98,6 +99,7 @@ export function DoodleButton({
             fontSize: size,
             color: disabled ? C.fadedInk : color,
             includeFontPadding: false,
+            marginTop: pressed ? 2 : 0,
           }}
         >
           {label}
@@ -107,10 +109,10 @@ export function DoodleButton({
   );
 }
 
-// ---- Small pill (Catbook stat fields) ----
+// ---- Small pill (stat fields) ----
 export function StatPill({
   children,
-  borderColor = C.fadedInk,
+  borderColor = '#C89A62',
   style,
 }: {
   children: React.ReactNode;
@@ -124,7 +126,7 @@ export function StatPill({
           backgroundColor: C.white,
           borderWidth: 2.5,
           borderColor,
-          borderRadius: 14,
+          borderRadius: 6,
           paddingVertical: 6,
           paddingHorizontal: 12,
           minHeight: 34,

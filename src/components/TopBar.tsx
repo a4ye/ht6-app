@@ -1,10 +1,11 @@
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { C, F, doodleCorners } from '../theme';
+import { Image, Pressable, Text, View } from 'react-native';
+import { C, F } from '../theme';
 import OutlinedText from './OutlinedText';
+import { BTN_CREAM, ICONS, NineSliceBg } from './PixelUI';
 import { useNav } from '../state/nav';
 
-// Screen header: Close button top-left, chunky outlined title.
+// Screen header: sprite Close button top-left, chunky pixel title.
 export default function TopBar({ title }: { title: string }) {
   const nav = useNav();
   return (
@@ -19,39 +20,29 @@ export default function TopBar({ title }: { title: string }) {
     >
       <Pressable onPress={nav.back} hitSlop={8}>
         <View
-          style={[
-            {
-              backgroundColor: C.cream,
-              borderWidth: 3,
-              borderColor: C.brown,
-              width: 62,
-              height: 62,
-              alignItems: 'center',
-              justifyContent: 'center',
-            },
-            doodleCorners(21, 16),
-          ]}
+          style={{
+            width: 60,
+            height: 60,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
         >
+          <NineSliceBg set={BTN_CREAM} corner={12} />
+          <Image source={ICONS.x} style={{ width: 22, height: 22 }} />
           <Text
             allowFontScaling={false}
-            style={{ fontFamily: F.display, fontSize: 26, color: C.orange, includeFontPadding: false, lineHeight: 30 }}
-          >
-            ✕
-          </Text>
-          <Text
-            allowFontScaling={false}
-            style={{ fontFamily: F.display, fontSize: 12, color: C.brown, includeFontPadding: false }}
+            style={{ fontFamily: F.display, fontSize: 9, color: C.brown, includeFontPadding: false, marginTop: 2 }}
           >
             Close
           </Text>
         </View>
       </Pressable>
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
-        <OutlinedText size={30} color={C.white} outline={C.darkInk} thickness={2.5}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10 }}>
+        <OutlinedText size={26} color={C.white} outline={C.darkInk} thickness={2.5}>
           {title}
         </OutlinedText>
       </View>
-      <View style={{ width: 62 }} />
+      <View style={{ width: 60 }} />
     </View>
   );
 }

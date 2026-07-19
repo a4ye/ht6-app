@@ -1,7 +1,12 @@
 # Tomo Yard
 
-A hand-drawn (Neko Atsume style) friends app: real accounts, real hangouts, real proof
-you showed up. React Native (Expo) Android app + a small self-hosted server.
+A cozy pixel-art friends app: real accounts, real hangouts, real proof you showed up.
+React Native (Expo) Android app + a small self-hosted server.
+
+UI styling uses the Sprout Lands UI Pack (Basic) by Cup Nooble: sprite panels, buttons,
+icons, and pixel font in `assets/ui` and `assets/fonts`. Its license is free for
+non-commercial use only, no redistribution. If this app ever goes commercial, buy the
+Premium pack or replace those assets.
 
 ## How it works
 
