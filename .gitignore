@@ -36,6 +36,16 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# signing
+.keystore-pass.txt
+
+# terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/.terraform.lock.hcl.tmp
+infra/crash.log
+
 # generated native folders
 /ios
 /android
