@@ -12,7 +12,7 @@ const PROFILE_KEY = 'ty:profile:v2';
 const LEGACY_SESSION_KEY = 'ty:session:v1';
 const LEGACY_SECURE_TOKEN_KEY = 'ty:legacy-token:v1';
 const LEGACY_SUBJECT_PREFIX = 'legacy:';
-export const DEFAULT_SERVER = 'https://ht6.icinoxis.net';
+export const DEFAULT_SERVER = 'https://tomo-together.com';
 
 type CachedProfile = {
   subject: string;

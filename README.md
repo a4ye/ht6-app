@@ -32,9 +32,11 @@ assets before commercial use.
 
 ## Production
 
-- Main API and marketing site: <https://ht6.icinoxis.net>
-- Expo web app: <https://ht6-app.icinoxis.net>
-- APK download: <https://ht6.icinoxis.net/apk>
+- Main API and marketing site: <https://tomo-together.com>
+- Expo web app: <https://app.tomo-together.com>
+- APK download: <https://tomo-together.com/apk>
+- Legacy hostnames `ht6.icinoxis.net` / `ht6-app.icinoxis.net` 301-redirect to
+  the domains above; API routes still answer on the old host for installed APKs.
 - Main Azure App Service: `ht6-tomoyard`
 - Crypto Azure App Service: `ht6-tomoyard-crypto`
 - Atlas databases on the dedicated `tomo-yard` cluster: `tomoyard` (main social

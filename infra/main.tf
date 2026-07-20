@@ -95,12 +95,21 @@ locals {
   location        = "westeurope"
   app_name        = "ht6-tomoyard"
   crypto_app_name = "ht6-tomoyard-crypto"
-  domain          = "ht6.icinoxis.net"
-  web_domain      = "ht6-app.icinoxis.net" # react-native-web build of the app itself
+  # Legacy hostnames: kept bound so the server can 301 them to the new domain
+  # (and keep serving API calls from already-installed APKs).
+  domain     = "ht6.icinoxis.net"
+  web_domain = "ht6-app.icinoxis.net" # react-native-web build of the app itself
+  # Primary domain since 2026-07: registered on Cloudflare, same App Service.
+  new_domain     = "tomo-together.com"
+  new_web_domain = "app.tomo-together.com" # react-native-web build of the app itself
 }
 
 data "cloudflare_zone" "icinoxis" {
   name = "icinoxis.net"
+}
+
+data "cloudflare_zone" "tomo_together" {
+  name = "tomo-together.com"
 }
 
 resource "azurerm_resource_group" "rg" {
@@ -342,12 +351,100 @@ resource "azurerm_app_service_certificate_binding" "bind_app" {
   ssl_state           = "SniEnabled"
 }
 
+# --- primary domain: tomo-together.com ---
+# Cloudflare flattens the apex CNAME to A records, so Azure validates the
+# hostname via the resolved IP plus the asuid TXT record.
+
+resource "cloudflare_record" "tomo" {
+  zone_id = data.cloudflare_zone.tomo_together.id
+  name    = "@"
+  type    = "CNAME"
+  content = azurerm_linux_web_app.app.default_hostname
+  proxied = false
+  ttl     = 300
+}
+
+resource "cloudflare_record" "tomo_asuid" {
+  zone_id = data.cloudflare_zone.tomo_together.id
+  name    = "asuid"
+  type    = "TXT"
+  content = azurerm_linux_web_app.app.custom_domain_verification_id
+  ttl     = 300
+}
+
+resource "azurerm_app_service_custom_hostname_binding" "tomo" {
+  hostname            = local.new_domain
+  app_service_name    = azurerm_linux_web_app.app.name
+  resource_group_name = azurerm_resource_group.rg.name
+
+  depends_on = [cloudflare_record.tomo, cloudflare_record.tomo_asuid]
+
+  lifecycle {
+    ignore_changes = [ssl_state, thumbprint]
+  }
+}
+
+resource "azurerm_app_service_managed_certificate" "cert_tomo" {
+  custom_hostname_binding_id = azurerm_app_service_custom_hostname_binding.tomo.id
+}
+
+resource "azurerm_app_service_certificate_binding" "bind_tomo" {
+  hostname_binding_id = azurerm_app_service_custom_hostname_binding.tomo.id
+  certificate_id      = azurerm_app_service_managed_certificate.cert_tomo.id
+  ssl_state           = "SniEnabled"
+}
+
+# --- app.tomo-together.com: the react-native-web clone of the app ---
+
+resource "cloudflare_record" "tomo_app" {
+  zone_id = data.cloudflare_zone.tomo_together.id
+  name    = "app"
+  type    = "CNAME"
+  content = azurerm_linux_web_app.app.default_hostname
+  proxied = false
+  ttl     = 300
+}
+
+resource "cloudflare_record" "tomo_asuid_app" {
+  zone_id = data.cloudflare_zone.tomo_together.id
+  name    = "asuid.app"
+  type    = "TXT"
+  content = azurerm_linux_web_app.app.custom_domain_verification_id
+  ttl     = 300
+}
+
+resource "azurerm_app_service_custom_hostname_binding" "tomo_app" {
+  hostname            = local.new_web_domain
+  app_service_name    = azurerm_linux_web_app.app.name
+  resource_group_name = azurerm_resource_group.rg.name
+
+  depends_on = [cloudflare_record.tomo_app, cloudflare_record.tomo_asuid_app]
+
+  lifecycle {
+    ignore_changes = [ssl_state, thumbprint]
+  }
+}
+
+resource "azurerm_app_service_managed_certificate" "cert_tomo_app" {
+  custom_hostname_binding_id = azurerm_app_service_custom_hostname_binding.tomo_app.id
+}
+
+resource "azurerm_app_service_certificate_binding" "bind_tomo_app" {
+  hostname_binding_id = azurerm_app_service_custom_hostname_binding.tomo_app.id
+  certificate_id      = azurerm_app_service_managed_certificate.cert_tomo_app.id
+  ssl_state           = "SniEnabled"
+}
+
 output "app_default_hostname" {
   value = azurerm_linux_web_app.app.default_hostname
 }
 
 output "site_url" {
-  value = "https://${local.domain}"
+  value = "https://${local.new_domain}"
+}
+
+output "web_app_url" {
+  value = "https://${local.new_web_domain}"
 }
 
 output "crypto_app_name" {

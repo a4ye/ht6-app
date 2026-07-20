@@ -237,6 +237,24 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+// Legacy icinoxis hostnames forward to tomo-together.com. On the API host the
+// redirect covers only browser-facing GETs: installed APKs still have the old
+// base URL baked in, and OkHttp drops the Authorization header on cross-host
+// redirects, so API routes must keep answering on the old hostname.
+const API_PATHS = /^\/(auth|me|friends|hangouts|wallet|catalog|memories|suggestions|leaderboard|users|duels|shop|secret|world|activities|uploads|health)(\/|$)/;
+app.use((req, res, next) => {
+  if (req.hostname === 'ht6-app.icinoxis.net') {
+    return res.redirect(301, 'https://app.tomo-together.com' + req.originalUrl);
+  }
+  if (
+    req.hostname === 'ht6.icinoxis.net' &&
+    (req.method === 'GET' || req.method === 'HEAD') &&
+    !API_PATHS.test(req.path)
+  ) {
+    return res.redirect(301, 'https://tomo-together.com' + req.originalUrl);
+  }
+  next();
+});
 app.use(express.json());
 // Every request waits for the one-time MongoDB initialization. After the first
 // resolution this is a resolved-promise await and effectively free.
@@ -245,8 +263,8 @@ app.use((req, res, next) => {
 });
 app.use('/uploads', express.static(UPLOAD_DIR));
 // react-native-web clone of the app: CI exports the same src/ to static files and
-// drops them in DATA_DIR/webapp; we serve them for the ht6-app.* host only.
-const WEB_HOST = process.env.WEB_HOST || 'ht6-app.icinoxis.net';
+// drops them in DATA_DIR/webapp; we serve them for the app.* host only.
+const WEB_HOST = process.env.WEB_HOST || 'app.tomo-together.com';
 const WEB_DIR = path.join(DATA_DIR, 'webapp');
 const webStatic = express.static(WEB_DIR);
 app.use((req, res, next) => {

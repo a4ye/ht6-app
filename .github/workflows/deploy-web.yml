@@ -57,7 +57,7 @@ jobs:
       - name: Zip export
         run: cd dist && zip -qr ../web.zip .
 
-      - name: Upload to App Service (served at ht6-app.icinoxis.net)
+      - name: Upload to App Service (served at app.tomo-together.com)
         env:
           KUDU_USER: ${{ secrets.KUDU_USER }}
           KUDU_PASS: ${{ secrets.KUDU_PASS }}

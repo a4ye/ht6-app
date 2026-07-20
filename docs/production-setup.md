@@ -271,9 +271,9 @@ package, iOS bundle identifier, app config, and SDK calls must agree exactly.
 `BPyKeYjxBEeYPUALcdhUoGaSRcKylpkX`. Its current settings are:
 
 ```text
-Allowed Callback URLs:  https://ht6-app.icinoxis.net
-Allowed Logout URLs:    https://ht6-app.icinoxis.net
-Allowed Web Origins:    https://ht6-app.icinoxis.net
+Allowed Callback URLs:  https://app.tomo-together.com, https://ht6-app.icinoxis.net
+Allowed Logout URLs:    https://app.tomo-together.com, https://ht6-app.icinoxis.net
+Allowed Web Origins:    https://app.tomo-together.com, https://ht6-app.icinoxis.net
 ```
 
 `http://localhost:8081` is also present in the first three lists for local
@@ -630,7 +630,7 @@ project.
 
 On Android/iOS, music is foreground-only: it pauses when the app becomes inactive,
 does not opt into lock-screen/background playback, respects silent mode, and mixes
-with other audio. On `https://ht6-app.icinoxis.net`, browser autoplay policy means
+with other audio. On `https://app.tomo-together.com`, browser autoplay policy means
 the default unmuted preference cannot begin playback until the first pointer, touch,
 or keyboard gesture. The toggle itself also unlocks playback. This is expected
 browser behavior, not a deployment failure. Test initial gesture unlock, mute
