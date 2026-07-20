@@ -61,6 +61,14 @@ jobs:
       - name: Start builder VM
         run: az vm start -g ht6-tomoyard-rg -n ht6-builder
 
+      # The public IP changes whenever the builder is destroyed and recreated;
+      # resolve it from Azure instead of pinning it in a secret.
+      - name: Resolve builder IP
+        run: |
+          BUILDER_HOST=$(az vm show -d -g ht6-tomoyard-rg -n ht6-builder --query publicIps -o tsv)
+          test -n "$BUILDER_HOST"
+          echo "BUILDER_HOST=$BUILDER_HOST" >> "$GITHUB_ENV"
+
       - name: Write SSH key
         run: |
           install -m 600 /dev/null builder_key
@@ -70,7 +78,7 @@ jobs:
         run: |
           for i in $(seq 1 60); do
             ssh -i builder_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
-              azureuser@${{ secrets.BUILDER_HOST }} 'test -f /opt/build/.ready' && exit 0
+              azureuser@$BUILDER_HOST 'test -f /opt/build/.ready' && exit 0
             sleep 10
           done
           echo "builder never became ready" >&2; exit 1
@@ -79,9 +87,9 @@ jobs:
         run: |
           scp -i builder_key -o StrictHostKeyChecking=accept-new \
             infra/build-apk-remote.sh \
-            azureuser@${{ secrets.BUILDER_HOST }}:/opt/build/build-ci.sh
+            azureuser@$BUILDER_HOST:/opt/build/build-ci.sh
           ssh -i builder_key -o StrictHostKeyChecking=accept-new \
-            azureuser@${{ secrets.BUILDER_HOST }} \
+            azureuser@$BUILDER_HOST \
             'chmod 700 /opt/build/build-ci.sh'
 
       - name: Build on Azure VM
@@ -100,11 +108,11 @@ jobs:
             "$EXPO_PUBLIC_AUTH0_DOMAIN" "$EXPO_PUBLIC_AUTH0_CLIENT_ID" \
             "$EXPO_PUBLIC_AUTH0_WEB_CLIENT_ID" "$EXPO_PUBLIC_AUTH0_AUDIENCE" \
             | ssh -i builder_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
-                azureuser@${{ secrets.BUILDER_HOST }} \
+                azureuser@$BUILDER_HOST \
                 '/opt/build/build-ci.sh'
 
       - name: Fetch APK for artifact
-        run: scp -i builder_key -o StrictHostKeyChecking=accept-new azureuser@${{ secrets.BUILDER_HOST }}:/opt/build/last.apk tomo-yard.apk
+        run: scp -i builder_key -o StrictHostKeyChecking=accept-new azureuser@$BUILDER_HOST:/opt/build/last.apk tomo-yard.apk
 
       - uses: actions/upload-artifact@v4
         with:
