@@ -334,29 +334,32 @@ a{color:inherit;text-decoration:none}
 .fin-copy{position:relative;z-index:6;display:flex;flex-direction:column;align-items:center;gap:10px;padding-bottom:30svh}
 .cta-big{font-size:clamp(1.35rem,5.6vw,1.85rem);min-height:66px;padding:4px 26px 10px}
 .cta-web{font-size:clamp(1rem,4vw,1.2rem);min-height:52px;padding:2px 18px 6px}
+/* The finale grass stays low (12svh, barely above scene 6's 10svh): the grass
+   line must not climb before the footer arrives — only the footer push lifts
+   it. The whole tableau sits on that low band. */
 .fence{
-  position:absolute;left:-12px;right:-12px;bottom:calc(25svh - 40px);height:58px;
+  position:absolute;left:-12px;right:-12px;bottom:calc(12svh - 40px);height:58px;
   background:url('px/world/fenceH.png') repeat-x bottom / auto 100%;
   image-rendering:pixelated;
   z-index:3;pointer-events:none;
 }
 .fin-av{z-index:4}
-.fn1{bottom:calc(25svh - 20px);left:calc(50% - 50px);width:100px;z-index:5}
-.fn2{bottom:calc(22svh - 16px);left:4%;width:78px}
-.fn3{bottom:calc(26svh - 12px);left:26%;width:64px}
-.fn4{bottom:calc(25svh - 16px);right:24%;width:74px}
-.fn5{bottom:calc(20svh - 14px);right:4%;width:84px}
-.fn6{bottom:calc(17svh - 4px);left:38%;width:56px;z-index:6}
-.sc-finale .ground{height:calc(25svh + 28px)}
+.fn1{bottom:calc(12svh - 20px);left:calc(50% - 50px);width:100px;z-index:5}
+.fn2{bottom:calc(9svh - 16px);left:4%;width:78px}
+.fn3{bottom:calc(13svh - 12px);left:26%;width:64px}
+.fn4{bottom:calc(12svh - 16px);right:24%;width:74px}
+.fn5{bottom:calc(7svh - 14px);right:4%;width:84px}
+.fn6{bottom:calc(4svh - 4px);left:38%;width:56px;z-index:6}
+.sc-finale .ground{height:calc(12svh + 28px)}
 .fin-acorn{position:absolute;z-index:5;width:26px}
-.fa1{bottom:15svh;left:13%}
-.fa2{bottom:13svh;right:34%;width:22px}
-.fa3{bottom:17svh;right:9%}
-.fa4{bottom:12svh;left:45%;width:20px}
+.fa1{bottom:5svh;left:13%}
+.fa2{bottom:3svh;right:34%;width:22px}
+.fa3{bottom:6svh;right:9%}
+.fa4{bottom:2svh;left:45%;width:20px}
 .fheart{position:absolute;z-index:5;width:26px;opacity:0}
-.fh1{bottom:36svh;left:22%}
-.fh2{bottom:34svh;left:52%}
-.fh3{bottom:37svh;right:18%}
+.fh1{bottom:23svh;left:22%}
+.fh2{bottom:21svh;left:52%}
+.fh3{bottom:24svh;right:18%}
 .credit{position:absolute;bottom:1.6svh;left:0;right:0;text-align:center;font-size:.85rem;color:var(--ink);z-index:6}
 /* ============ continuity world (enabled only when JS+GSAP run) ============ */
 #world,#trav,#wflash,.wshut{display:none}
@@ -974,7 +977,7 @@ a{color:inherit;text-decoration:none}
     while (n && !(n.classList && n.classList.contains('scene'))){ x += n.offsetLeft; y += n.offsetTop; n = n.offsetParent; }
     return { x: x, y: y, w: el.offsetWidth, h: el.offsetHeight };
   }
-  var BH   = { 1: 24, 2: 26, 3: 16, 4: 16, 5: 16, 6: 10, 7: 25 };            // ground band svh per scene
+  var BH   = { 1: 24, 2: 26, 3: 16, 4: 16, 5: 16, 6: 10, 7: 12 };            // ground band svh per scene; 7 stays low — only the footer push lifts the grass
   var CATX = { 1: 50, 2: 50, 3: 18, 4: 71, 5: 6, 6: 26, 7: 50 };             // cat station centers, vw
   var CATS = { 1: 1, 2: .9, 3: .78, 4: .85, 5: .8, 6: .78, 7: .96 };         // cat scale per station
   var SUN  = [[12,10],[18,8],[25,6],[30,5],[38,4],[43,4],[50,3],[54,4],[61,6],[65,9],[71,14],[78,62]];
@@ -1435,18 +1438,15 @@ a{color:inherit;text-decoration:none}
     onRefresh: function(self){ if (self.progress > 0) crownOn(); }
   });
 
-  /* Hold the finished tableau for a beat: the finale is exactly one viewport
-     tall, so without a pin the footer push would begin the instant the cast
-     settles. Pinning freezes the scene-locals in step with the fixed world,
-     giving the reader a stretch of rest before anything moves again. */
-  ScrollTrigger.create({ trigger: '.sc-finale', start: 'top top', end: '+=75%', pin: true, pinSpacing: true });
-
-  /* The finale is the closing tableau, so nothing fades. The world layers are
-     fixed while the footer scrolls in normal flow; translating them up in
-     lockstep with the footer's entry (scroll distance == footer height) makes
-     the footer push the whole scene up instead of sliding over it. scrub:true,
-     not a smoothed scrub: any catch-up lag would desync the fixed layers from
-     the natively scrolling footer and scene-local props. */
+  /* The finale is the closing tableau, so nothing fades and nothing is pinned
+     (a pin's spacer shifted this trigger's window on some viewports, firing
+     the push while the footer was still far below — grass up over revealed
+     background). The world layers are fixed while the footer scrolls in
+     normal flow; translating them up in lockstep with the footer's entry
+     (scroll distance == footer height) makes the footer push the whole scene
+     up instead of sliding over it. scrub:true, not a smoothed scrub: any
+     catch-up lag would desync the fixed layers from the natively scrolling
+     footer and scene-local props. */
   gsap.timeline({ scrollTrigger: {
     trigger: '.bigmark', start: 'top bottom', end: 'bottom bottom',
     scrub: true, invalidateOnRefresh: true
