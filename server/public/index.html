@@ -6,7 +6,8 @@
 <title>Tomo Together</title>
 <meta name="description" content="Tomo Together — fill your yard with real hangouts.">
 <meta name="theme-color" content="#F2D9A4">
-<link rel="icon" type="image/png" href="px/world/acorn.png">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preload" href="px/SproutPixel.ttf" as="font" type="font/ttf" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -601,6 +602,7 @@ a{color:inherit;text-decoration:none}
       <div class="dl-btn-w">
         <a class="pbtn dl-btn" href="/apk" download><span class="bl">Download APK</span></a>
         <p class="dl-cap">~100 MB · Android</p>
+        <a class="pbtn pbtn-cream cta-web" href="https://app.tomo-together.com"><span class="bl">Launch web version</span></a>
       </div>
     </div>
   </div>
@@ -852,7 +854,7 @@ a{color:inherit;text-decoration:none}
   <svg class="spark twinkle2" style="top:26%;right:12%;width:13px" viewBox="0 0 8 8" aria-hidden="true"><use href="#px-plus"/></svg>
 
   <div class="fin-copy">
-    <a class="pbtn cta-big" href="/apk" download><span class="bl">Start my yard</span></a>
+    <a class="pbtn cta-big" href="/apk" download><span class="bl">Download APK</span></a>
     <p class="dl-cap">~100 MB · Android</p>
     <a class="pbtn pbtn-cream cta-web" href="https://app.tomo-together.com"><span class="bl">Launch web version</span></a>
   </div>
@@ -1408,11 +1410,12 @@ a{color:inherit;text-decoration:none}
   });
 
   /* ---------- 7 · FINALE: CTAs pop, crown lands on the cat ---------- */
-  gsap.set('.cta-big, .cta-web', { scale: .4, opacity: 0 });
+  /* scoped to the finale: the hero reuses .cta-web and must stay visible */
+  gsap.set('.sc-finale .cta-big, .sc-finale .cta-web', { scale: .4, opacity: 0 });
   gsap.set('.fin-acorn', { y: -110, opacity: 0 });
   gsap.set('.credit', { opacity: 0, y: 12 });
   var finTl = gsap.timeline({ paused: true })
-    .to('.cta-big, .cta-web', { scale: 1, opacity: 1, duration: .9, ease: 'elastic.out(1,.5)', stagger: .16 }, .1)
+    .to('.sc-finale .cta-big, .sc-finale .cta-web', { scale: 1, opacity: 1, duration: .9, ease: 'elastic.out(1,.5)', stagger: .16 }, .1)
     .to('.fin-acorn', { y: 0, opacity: 1, duration: .7, ease: 'bounce.out', stagger: .09 }, .3)
     .to('.credit', { opacity: 1, y: 0, duration: .5 }, .9);
   var finGo = function(){ if (finTl.paused()) finTl.play(); };
@@ -1431,6 +1434,12 @@ a{color:inherit;text-decoration:none}
     onEnter: crownOn, onLeaveBack: crownOff,
     onRefresh: function(self){ if (self.progress > 0) crownOn(); }
   });
+
+  /* Hold the finished tableau for a beat: the finale is exactly one viewport
+     tall, so without a pin the footer push would begin the instant the cast
+     settles. Pinning freezes the scene-locals in step with the fixed world,
+     giving the reader a stretch of rest before anything moves again. */
+  ScrollTrigger.create({ trigger: '.sc-finale', start: 'top top', end: '+=75%', pin: true, pinSpacing: true });
 
   /* The finale is the closing tableau, so nothing fades. The world layers are
      fixed while the footer scrolls in normal flow; translating them up in

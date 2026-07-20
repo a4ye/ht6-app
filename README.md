@@ -1,5 +1,9 @@
 # Tomo Together
 
+- **Site + API:** <https://tomo-together.com>
+- **Web app:** <https://app.tomo-together.com>
+- **APK download:** <https://tomo-together.com/apk>
+
 A cozy pixel-art friends app: real accounts, real hangouts, and real proof you
 showed up. It ships as an Expo/React Native Android app and web build backed by a
 small Express API.
