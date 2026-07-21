@@ -33,14 +33,6 @@ async function ensureIndexes(s) {
     s.users.createIndexes([
       { key: { username: 1 }, name: 'users_username_unique', unique: true },
       { key: { token: 1 }, name: 'users_token_unique', unique: true },
-      {
-        key: { auth0_sub: 1 },
-        name: 'users_auth0_sub_unique',
-        unique: true,
-        // Mirrors SQLite's `WHERE auth0_sub IS NOT NULL` partial index:
-        // legacy rows keep auth0_sub null and do not participate.
-        partialFilterExpression: { auth0_sub: { $exists: true, $type: 'string' } },
-      },
     ]),
     s.weights.createIndexes([
       { key: { user_id: 1, activity: 1 }, name: 'weights_user_activity_unique', unique: true },

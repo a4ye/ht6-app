@@ -2,8 +2,8 @@
 # Versioned Android release build executed on the persistent Azure builder.
 #
 # The workflow sends values as NUL-delimited stdin fields in the order below.
-# This keeps credentials and Expo public configuration out of the remote
-# command line and avoids evaluating any value as shell code.
+# This keeps credentials out of the remote command line and avoids evaluating
+# any value as shell code.
 set -euo pipefail
 
 configure_android_metro_cache_reset() {
@@ -16,7 +16,7 @@ if (!/^\s*react\s*\{/m.test(gradle)) {
   throw new Error(`React Native Gradle extension not found in ${gradlePath}`);
 }
 fs.appendFileSync(gradlePath, `
-// CI_METRO_RESET_CACHE: build-time EXPO_PUBLIC_* values must not be stale.
+// CI_METRO_RESET_CACHE: force a fresh release JS bundle on every build.
 react {
     extraPackagerArgs = ["--reset-cache"]
 }
@@ -54,19 +54,10 @@ for name in \
   KUDU_USER \
   KUDU_PASS \
   KEYSTORE_B64 \
-  KEYSTORE_PASS \
-  EXPO_PUBLIC_AUTH0_DOMAIN \
-  EXPO_PUBLIC_AUTH0_CLIENT_ID \
-  EXPO_PUBLIC_AUTH0_WEB_CLIENT_ID \
-  EXPO_PUBLIC_AUTH0_AUDIENCE
+  KEYSTORE_PASS
 do
   read_required "$name"
 done
-
-# Expo CLI reads the domain while resolving app.config.ts during Prebuild, and
-# Metro reads all four values later when Gradle creates the release JS bundle.
-export EXPO_PUBLIC_AUTH0_DOMAIN EXPO_PUBLIC_AUTH0_CLIENT_ID
-export EXPO_PUBLIC_AUTH0_WEB_CLIENT_ID EXPO_PUBLIC_AUTH0_AUDIENCE
 
 export ANDROID_HOME=/opt/android-sdk
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
@@ -108,8 +99,6 @@ fs.writeFileSync('version.json', JSON.stringify({
 NODE
 cat version.json
 
-# Auth0's config plugin reads EXPO_PUBLIC_AUTH0_DOMAIN during Prebuild. Metro
-# then reads all four exported EXPO_PUBLIC_* values while Gradle bundles JS.
 # A clean generation prevents the persistent checkout from retaining native
 # configuration produced by an earlier build.
 EXPO_NO_GIT_STATUS=1 npx expo prebuild --clean --platform android --no-install

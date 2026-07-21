@@ -7,15 +7,19 @@ const fs = require('fs');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const { closeDb, connectDb, isDuplicateKeyError, nextId, store, withId } = require('./db');
-const {
-  AuthConfigurationError,
-  bindAuth0Subject,
-  classifyBearerToken,
-  createAuth0JwtMiddleware,
-  getBearerToken,
-  isLegacyAuthEnabled,
-  isLegacyTokenAllowed,
-} = require('./auth0');
+
+// Marks the placeholder credentials written for accounts provisioned during the
+// Auth0 era. Such a row has no real password; the first self-hosted login for
+// that username sets one (claim-on-login).
+const AUTH0_DISABLED_PREFIX = 'auth0-disabled:';
+
+/** Extracts a single Bearer credential, rejecting comma/space-joined values. */
+function getBearerToken(req) {
+  const header = req && req.headers && req.headers.authorization;
+  if (typeof header !== 'string') return null;
+  const match = /^Bearer[\t ]+([^\s,]+)$/i.exec(header.trim());
+  return match ? match[1] : null;
+}
 
 const PORT = process.env.PORT || 4000;
 // DATA_DIR is overridable so hosted deploys can keep state outside the app dir
@@ -320,14 +324,6 @@ async function getHangout(id) {
   return withId(await store.hangouts.findOne({ _id: id }));
 }
 
-let auth0JwtMiddleware = null;
-let auth0ConfigurationError = null;
-try {
-  auth0JwtMiddleware = createAuth0JwtMiddleware();
-} catch (error) {
-  auth0ConfigurationError = error;
-}
-
 function publicUser(u) {
   return {
     username: u.username,
@@ -343,60 +339,14 @@ function notSignedIn(res) {
   return res.status(401).json({ error: 'Not signed in' });
 }
 
-function requireLegacyAuthEnabled(_req, res, next) {
-  if (!isLegacyAuthEnabled()) {
-    return res.status(403).json({ error: 'Legacy authentication is disabled' });
-  }
-  next();
-}
-
-// JWT-only identity validation for profile discovery/onboarding. This path is
-// deliberately separate from legacy auth: even a malformed JWT is verified as
-// a JWT and can never fall back to a database token lookup.
-function auth0Identity(req, res, next) {
+function auth(req, res, next) {
   const token = getBearerToken(req);
-  if (classifyBearerToken(token) !== 'jwt') return notSignedIn(res);
-  if (auth0ConfigurationError) return next(auth0ConfigurationError);
-  if (!auth0JwtMiddleware) {
-    return next(new AuthConfigurationError('Auth0 JWT verification is unavailable'));
-  }
-  auth0JwtMiddleware(req, res, (error) => {
-    if (error) return next(error);
-    bindAuth0Subject(req, res, next);
-  });
-}
-
-function requireAuth0Profile(req, res, next) {
-  store.users.findOne({ auth0_sub: req.auth0Sub }).then((user) => {
-    if (!user) return res.status(409).json({ error: 'PROFILE_REQUIRED' });
+  if (!token) return notSignedIn(res);
+  store.users.findOne({ token }).then((user) => {
+    if (!user) return notSignedIn(res);
     req.user = withId(user);
     next();
   }, next);
-}
-
-function auth(req, res, next) {
-  const token = getBearerToken(req);
-  const kind = classifyBearerToken(token);
-
-  if (kind === 'legacy') {
-    if (!isLegacyTokenAllowed(token)) return notSignedIn(res);
-    // `auth0_sub: null` matches both stored-null and absent, mirroring IS NULL.
-    store.users.findOne({ token, auth0_sub: null }).then((user) => {
-      if (!user) return notSignedIn(res);
-      req.user = withId(user);
-      next();
-    }, next);
-    return;
-  }
-
-  if (kind === 'jwt') {
-    return auth0Identity(req, res, (error) => {
-      if (error) return next(error);
-      requireAuth0Profile(req, res, next);
-    });
-  }
-
-  return notSignedIn(res);
 }
 
 async function bonusFor(dateISO, memberIds) {
@@ -544,96 +494,7 @@ function isValidBirthday(value) {
     parsed.getUTCDate() === day;
 }
 
-app.get('/auth/profile', auth0Identity, asyncRoute(async (req, res) => {
-  const user = await store.users.findOne({ auth0_sub: req.auth0Sub });
-  res.json({ me: user ? meView(user) : null });
-}));
-
-async function provisionAuth0Profile(profile) {
-  const existing = await store.users.findOne({ auth0_sub: profile.auth0Sub });
-  if (existing) return { created: false, user: withId(existing) };
-  if (await store.users.findOne({ username: profile.username })) {
-    return { conflict: true };
-  }
-
-  // These values satisfy the old NOT NULL schema without creating a second
-  // credential. Their prefixes cannot be classified as a legacy bearer token,
-  // and legacy password login explicitly excludes Auth0-linked rows.
-  const disabledPasswordHash = `auth0-disabled:${crypto.randomBytes(32).toString('hex')}`;
-  const disabledSalt = `auth0-disabled:${crypto.randomBytes(16).toString('hex')}`;
-  const disabledToken = `auth0-disabled:${crypto.randomBytes(32).toString('hex')}`;
-  const doc = {
-    _id: await nextId('users'),
-    username: profile.username,
-    name: profile.name,
-    birthday: profile.birthday,
-    pass_hash: disabledPasswordHash,
-    salt: disabledSalt,
-    token: disabledToken,
-    auth0_sub: profile.auth0Sub,
-    acorns: 50,
-    color: profile.color,
-    species: profile.species,
-    owned: [],
-    equipped: [],
-    interests: profile.interests,
-    pos_x: null,
-    pos_y: null,
-    created_at: now(),
-  };
-  try {
-    // The unique indexes on username and auth0_sub serialize provisioning
-    // across server processes, replacing SQLite's IMMEDIATE transaction.
-    await store.users.insertOne(doc);
-  } catch (error) {
-    if (!isDuplicateKeyError(error)) throw error;
-    const raced = await store.users.findOne({ auth0_sub: profile.auth0Sub });
-    if (raced) return { created: false, user: withId(raced) };
-    return { conflict: true };
-  }
-  return { created: true, user: withId(doc) };
-}
-
-app.put('/auth/profile', auth0Identity, asyncRoute(async (req, res) => {
-  // Retried onboarding requests return the already-linked row unchanged. In
-  // particular, request claims or a later username cannot relink an identity.
-  const existing = await store.users.findOne({ auth0_sub: req.auth0Sub });
-  if (existing) return res.status(200).json({ me: meView(existing) });
-
-  const { username, name, birthday, color, species, interests } = req.body || {};
-  if (!/^[a-z0-9_]{3,20}$/.test(username || '')) {
-    return res.status(400).json({ error: 'Username must be 3-20 chars: a-z, 0-9, _' });
-  }
-  if (typeof name !== 'string' || name.length < 1 || name.length > 40 ||
-      name.trim() !== name || /[\u0000-\u001f\u007f]/.test(name)) {
-    return res.status(400).json({ error: 'Name is required and must be at most 40 characters' });
-  }
-  if (!isValidBirthday(birthday)) {
-    return res.status(400).json({ error: 'Birthday must be a valid date' });
-  }
-  if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) {
-    return res.status(400).json({ error: 'Color must be a six-digit hex color' });
-  }
-  if (!SPECIES.includes(species)) {
-    return res.status(400).json({ error: 'Species is not supported' });
-  }
-  const result = await provisionAuth0Profile({
-    auth0Sub: req.auth0Sub,
-    username,
-    name,
-    birthday,
-    color,
-    species,
-    interests: sanitizeInterests(interests),
-  });
-  if (result.conflict) return res.status(409).json({ error: 'Username is taken' });
-  if (!result.created) return res.status(200).json({ me: meView(result.user) });
-
-  cryptoApi.ensureUser(result.user.username).catch(() => {}); // best-effort wallet registration
-  return res.status(201).json({ me: meView(result.user) });
-}));
-
-app.post('/auth/register', requireLegacyAuthEnabled, asyncRoute(async (req, res) => {
+app.post('/auth/register', asyncRoute(async (req, res) => {
   const { username, name, birthday, password, color, species, interests } = req.body || {};
   if (!/^[a-z0-9_]{3,20}$/.test(username || ''))
     return res.status(400).json({ error: 'Username must be 3-20 chars: a-z, 0-9, _' });
@@ -676,10 +537,31 @@ app.post('/auth/register', requireLegacyAuthEnabled, asyncRoute(async (req, res)
   res.json({ token, me: meView(doc) });
 }));
 
-app.post('/auth/login', requireLegacyAuthEnabled, asyncRoute(async (req, res) => {
+app.post('/auth/login', asyncRoute(async (req, res) => {
   const { username, password } = req.body || {};
+  const pass = asString(password);
   const u = await store.users.findOne({ username: asString(username) });
-  if (!u || u.auth0_sub || hash(asString(password), u.salt) !== u.pass_hash)
+  if (!u) return res.status(401).json({ error: 'Wrong username or password' });
+
+  // Accounts provisioned during the Auth0 era carry a placeholder password and
+  // no usable credential. The first self-hosted login for such a username
+  // claims it: the submitted password becomes the account password and a real
+  // bearer token is minted. (These are the project's own demo accounts.)
+  if (typeof u.pass_hash === 'string' && u.pass_hash.startsWith(AUTH0_DISABLED_PREFIX)) {
+    if (!pass || pass.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    const salt = crypto.randomBytes(8).toString('hex');
+    const token = newToken();
+    await store.users.updateOne(
+      { _id: u._id },
+      { $set: { pass_hash: hash(pass, salt), salt, token, auth0_sub: null } },
+    );
+    cryptoApi.ensureUser(u.username).catch(() => {}); // best-effort wallet registration
+    return res.json({ token, me: meView(u) });
+  }
+
+  if (hash(pass, u.salt) !== u.pass_hash)
     return res.status(401).json({ error: 'Wrong username or password' });
   cryptoApi.ensureUser(u.username).catch(() => {}); // best-effort wallet registration
   res.json({ token: u.token, me: meView(u) });
@@ -1721,17 +1603,9 @@ function createServer() {
   return server;
 }
 
-// Auth0's verifier reports failures through Express errors. Keep the public
-// response stable and non-sensitive while preserving its Bearer challenge.
+// Keep error responses stable and non-sensitive, preserving a Bearer challenge
+// on 401 so clients can prompt for sign-in.
 app.use((error, _req, res, _next) => {
-  if (error instanceof AuthConfigurationError ||
-      error && error.name === 'AuthConfigurationError') {
-    return res.status(503).json({
-      error: error.code || 'AUTH0_CONFIGURATION_ERROR',
-      message: 'Auth0 authentication is temporarily unavailable',
-    });
-  }
-
   const status = Number(error && (error.statusCode || error.status));
   if (status === 401 || status === 403) {
     if (error.headers && typeof error.headers === 'object') res.set(error.headers);

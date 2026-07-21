@@ -6,7 +6,6 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef } from 'react';
 import { Animated, AppState, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { AuthProvider } from './src/auth';
 import BackgroundMusic from './src/components/BackgroundMusic';
 import YardBackground from './src/components/YardBackground';
 import { ensureNotifPermission, staleUsernameFromResponse, syncStaleReminders } from './src/notifications';
@@ -147,14 +146,12 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <SessionProvider>
-          <StatusBar style="dark" />
-          <BackgroundMusic>
-            <Root />
-          </BackgroundMusic>
-        </SessionProvider>
-      </AuthProvider>
+      <SessionProvider>
+        <StatusBar style="dark" />
+        <BackgroundMusic>
+          <Root />
+        </BackgroundMusic>
+      </SessionProvider>
     </SafeAreaProvider>
   );
 }

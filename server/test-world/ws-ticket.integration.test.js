@@ -12,45 +12,20 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tomoyard-world-'));
 process.env.DATA_DIR = dataDir;
 process.env.NODE_ENV = 'test';
 process.env.WORLD_WS_TICKET_TTL_MS = '80';
-process.env.ALLOW_LEGACY_AUTH = 'true';
-process.env.AUTH0_ISSUER_BASE_URL = 'https://test.us.auth0.com';
-process.env.AUTH0_AUDIENCE = 'https://api.test.tomoyard.invalid';
 delete process.env.CRYPTO_API_URL;
 delete process.env.CRYPTO_SERVICE_TOKEN;
 
-const LEGACY_TOKEN = 'f00dcafe'.repeat(6);
-const AUTH0_TOKEN = 'world.jwt.linked-profile';
-const PROFILE_REQUIRED_TOKEN = 'world.jwt.profile-required';
-const AUTH0_SUB = 'auth0|world-linked';
+// Two ordinary self-hosted bearer tokens, one per seeded user. The auth
+// middleware accepts any token that matches a user row, so these stand in for
+// real register/login tokens without needing the crypto service.
+const TOKEN_ALPHA = 'a1b2c3d4'.repeat(6);
+const TOKEN_BETA = 'f0e1d2c3'.repeat(6);
+const UNKNOWN_TOKEN = '0badc0de'.repeat(6);
 const loggedOutput = [];
 const originalConsole = {
   log: console.log,
   warn: console.warn,
   error: console.error,
-};
-
-// Keep the full server authentication dispatcher in the test. Only replace the
-// external signature/JWKS boundary with deterministic verified subjects.
-const auth0Path = require.resolve('../auth0');
-const realAuth0 = require(auth0Path);
-require.cache[auth0Path].exports = {
-  ...realAuth0,
-  createAuth0JwtMiddleware: () => (req, _res, next) => {
-    const token = realAuth0.getBearerToken(req);
-    const subjects = {
-      [AUTH0_TOKEN]: AUTH0_SUB,
-      [PROFILE_REQUIRED_TOKEN]: 'auth0|world-profile-required',
-    };
-    if (subjects[token]) {
-      req.auth = { payload: { sub: subjects[token] } };
-      return next();
-    }
-    const error = new Error('signature verification failed');
-    error.status = 401;
-    error.code = 'invalid_token';
-    error.headers = { 'WWW-Authenticate': 'Bearer error="invalid_token"' };
-    return next(error);
-  },
 };
 
 const { startTestMongo } = require('../test-helpers/mongo');
@@ -71,7 +46,7 @@ function captureConsole(method) {
   };
 }
 
-async function insertUser({ username, name, birthday, token, auth0Sub, color, species }) {
+async function insertUser({ username, name, birthday, token, color, species }) {
   await store.users.insertOne({
     _id: await nextId('users'),
     username,
@@ -80,7 +55,7 @@ async function insertUser({ username, name, birthday, token, auth0Sub, color, sp
     pass_hash: 'unused',
     salt: 'unused',
     token,
-    auth0_sub: auth0Sub,
+    auth0_sub: null,
     acorns: 50,
     color,
     species,
@@ -101,12 +76,12 @@ before(async () => {
   mongod = await startTestMongo();
   await init();
   await insertUser({
-    username: 'world_legacy', name: 'World Legacy', birthday: '2000-01-01',
-    token: LEGACY_TOKEN, auth0Sub: null, color: '#A8D8C8', species: 'cat',
+    username: 'world_alpha', name: 'World Alpha', birthday: '2000-01-01',
+    token: TOKEN_ALPHA, color: '#A8D8C8', species: 'cat',
   });
   await insertUser({
-    username: 'world_auth0', name: 'World Auth0', birthday: '2001-02-03',
-    token: 'auth0-disabled:world-test', auth0Sub: AUTH0_SUB, color: '#123ABC', species: 'frog',
+    username: 'world_beta', name: 'World Beta', birthday: '2001-02-03',
+    token: TOKEN_BETA, color: '#123ABC', species: 'frog',
   });
 
   server = createServer();
@@ -191,18 +166,17 @@ async function assertRejected(pathname) {
   assert.equal(result.status, 401);
 }
 
-test('ticket issuance requires an authenticated application profile', async () => {
+test('ticket issuance requires a valid bearer token', async () => {
   const missing = await issueTicket();
   assert.equal(missing.status, 401);
 
-  const profileRequired = await issueTicket(PROFILE_REQUIRED_TOKEN);
-  assert.equal(profileRequired.status, 409);
-  assert.deepEqual(profileRequired.json, { error: 'PROFILE_REQUIRED' });
+  const unknown = await issueTicket(UNKNOWN_TOKEN);
+  assert.equal(unknown.status, 401);
 });
 
 test('authenticated issuance is random, non-cacheable, and rotates abandoned tickets', async () => {
-  const first = await issueTicket(LEGACY_TOKEN);
-  const second = await issueTicket(LEGACY_TOKEN);
+  const first = await issueTicket(TOKEN_ALPHA);
+  const second = await issueTicket(TOKEN_ALPHA);
 
   assert.equal(first.status, 200);
   assert.equal(second.status, 200);
@@ -215,53 +189,53 @@ test('authenticated issuance is random, non-cacheable, and rotates abandoned tic
   await assertRejected(`/ws?ticket=${encodeURIComponent(first.json.ticket)}`);
   const accepted = await connectAndReadInit(second.json.ticket);
   assert.equal(accepted.init.type, 'init');
-  assert.equal(accepted.init.me, 'world_legacy');
+  assert.equal(accepted.init.me, 'world_alpha');
   await closeSocket(accepted.ws);
 });
 
 test('a websocket ticket is accepted exactly once and a fresh reconnect ticket works', async () => {
-  const first = await issueTicket(LEGACY_TOKEN);
+  const first = await issueTicket(TOKEN_ALPHA);
   assert.equal(first.status, 200);
   const connected = await connectAndReadInit(first.json.ticket);
-  assert.equal(connected.init.me, 'world_legacy');
+  assert.equal(connected.init.me, 'world_alpha');
   await closeSocket(connected.ws);
 
   await assertRejected(`/ws?ticket=${encodeURIComponent(first.json.ticket)}`);
 
-  const reconnect = await issueTicket(LEGACY_TOKEN);
+  const reconnect = await issueTicket(TOKEN_ALPHA);
   assert.equal(reconnect.status, 200);
   assert.notEqual(reconnect.json.ticket, first.json.ticket);
   const reconnected = await connectAndReadInit(reconnect.json.ticket);
-  assert.equal(reconnected.init.me, 'world_legacy');
+  assert.equal(reconnected.init.me, 'world_alpha');
   await closeSocket(reconnected.ws);
 });
 
 test('the websocket identity comes from the authenticated ticket issuer', async () => {
-  const response = await issueTicket(AUTH0_TOKEN);
+  const response = await issueTicket(TOKEN_BETA);
   assert.equal(response.status, 200);
   const connected = await connectAndReadInit(response.json.ticket);
   assert.equal(connected.init.type, 'init');
-  assert.equal(connected.init.me, 'world_auth0');
-  assert.ok(connected.init.players.some((player) => player.username === 'world_auth0'));
+  assert.equal(connected.init.me, 'world_beta');
+  assert.ok(connected.init.players.some((player) => player.username === 'world_beta'));
   await closeSocket(connected.ws);
 });
 
 test('expired and unknown tickets are rejected', async () => {
   assert.equal(worldTicketTtlMs(), 80);
-  const response = await issueTicket(LEGACY_TOKEN);
+  const response = await issueTicket(TOKEN_ALPHA);
   assert.equal(response.status, 200);
   await new Promise((resolve) => setTimeout(resolve, worldTicketTtlMs() + 40));
   await assertRejected(`/ws?ticket=${encodeURIComponent(response.json.ticket)}`);
   await assertRejected('/ws?ticket=unknown-world-ticket');
 });
 
-test('missing, duplicate, legacy, JWT, and legacy token query credentials are rejected', async () => {
+test('missing, duplicate, and raw-token query credentials are rejected', async () => {
   await assertRejected('/ws');
   await assertRejected('/ws?ticket=');
-  await assertRejected(`/ws?ticket=${LEGACY_TOKEN}`);
-  await assertRejected(`/ws?ticket=${encodeURIComponent(AUTH0_TOKEN)}`);
-  await assertRejected(`/ws?token=${LEGACY_TOKEN}`);
-  await assertRejected(`/ws?token=${encodeURIComponent(AUTH0_TOKEN)}`);
+  // A bearer token is not a ticket: the socket only accepts issued tickets.
+  await assertRejected(`/ws?ticket=${TOKEN_ALPHA}`);
+  await assertRejected(`/ws?ticket=${TOKEN_BETA}`);
+  await assertRejected(`/ws?token=${TOKEN_ALPHA}`);
   await assertRejected('/ws?ticket=one&ticket=two');
   await assertRejected('/ws?ticket=unknown&token=also-unknown');
 });
@@ -269,9 +243,8 @@ test('missing, duplicate, legacy, JWT, and legacy token query credentials are re
 test('websocket credential material is never written to application logs', () => {
   const output = loggedOutput.join('\n');
   const credentials = [
-    LEGACY_TOKEN,
-    AUTH0_TOKEN,
-    PROFILE_REQUIRED_TOKEN,
+    TOKEN_ALPHA,
+    TOKEN_BETA,
     ...issuedTickets,
   ];
   for (const credential of credentials) {

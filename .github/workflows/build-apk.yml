@@ -33,23 +33,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      # Auth0 client configuration is intentionally stored as Actions variables:
-      # Expo inlines EXPO_PUBLIC_* values into the client bundle.
-      EXPO_PUBLIC_AUTH0_DOMAIN: ${{ vars.EXPO_PUBLIC_AUTH0_DOMAIN }}
-      EXPO_PUBLIC_AUTH0_CLIENT_ID: ${{ vars.EXPO_PUBLIC_AUTH0_CLIENT_ID }}
-      EXPO_PUBLIC_AUTH0_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_AUTH0_WEB_CLIENT_ID }}
-      EXPO_PUBLIC_AUTH0_AUDIENCE: ${{ vars.EXPO_PUBLIC_AUTH0_AUDIENCE }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Validate public Auth0 build configuration
-        shell: bash
-        run: |
-          : "${EXPO_PUBLIC_AUTH0_DOMAIN:?Set the EXPO_PUBLIC_AUTH0_DOMAIN Actions variable}"
-          : "${EXPO_PUBLIC_AUTH0_CLIENT_ID:?Set the EXPO_PUBLIC_AUTH0_CLIENT_ID Actions variable}"
-          : "${EXPO_PUBLIC_AUTH0_WEB_CLIENT_ID:?Set the EXPO_PUBLIC_AUTH0_WEB_CLIENT_ID Actions variable}"
-          : "${EXPO_PUBLIC_AUTH0_AUDIENCE:?Set the EXPO_PUBLIC_AUTH0_AUDIENCE Actions variable}"
 
       - name: Azure login (scoped to the builder VM)
         uses: azure/login@v2
@@ -105,8 +90,6 @@ jobs:
           # is static, so credentials are neither logged nor evaluated as code.
           printf '%s\0' \
             "$GITHUB_SHA" "$GH_TOKEN" "$KUDU_USER" "$KUDU_PASS" "$KEYSTORE_B64" "$KEYSTORE_PASS" \
-            "$EXPO_PUBLIC_AUTH0_DOMAIN" "$EXPO_PUBLIC_AUTH0_CLIENT_ID" \
-            "$EXPO_PUBLIC_AUTH0_WEB_CLIENT_ID" "$EXPO_PUBLIC_AUTH0_AUDIENCE" \
             | ssh -i builder_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
                 azureuser@$BUILDER_HOST \
                 '/opt/build/build-ci.sh'

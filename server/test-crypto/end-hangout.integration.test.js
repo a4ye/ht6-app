@@ -9,9 +9,6 @@ const { after, before, test } = require('node:test');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tomoyard-end-hangout-'));
 process.env.DATA_DIR = dataDir;
-process.env.ALLOW_LEGACY_AUTH = 'true';
-process.env.AUTH0_ISSUER_BASE_URL = 'https://test.us.auth0.com';
-process.env.AUTH0_AUDIENCE = 'https://api.test.tomoyard.invalid';
 
 class CryptoError extends Error {
   constructor(status, message, code = 'crypto_request_failed') {

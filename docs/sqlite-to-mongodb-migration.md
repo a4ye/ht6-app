@@ -14,21 +14,20 @@ run only needs any MongoDB at `MONGODB_URI` (default
 
 - `server/` depends on `mongodb` instead of `better-sqlite3`; every route reads
   and writes MongoDB. Integer ids are preserved (allocated from a `counters`
-  collection), so API payloads, NFC payloads, and Auth0 subject backfill ids
-  (`tomoyard-<id>`) are unchanged.
+  collection), so API payloads and NFC payloads are unchanged.
 - The old per-hangout tables became embedded arrays on the hangout document:
   `hangout_members` → `member_ids`, `confirms` → `confirms`, `hangout_stakes` →
   `stakes`, `hangout_settlements` → `settlements`. NFC tokens are embedded too
   but are short-lived and not migrated.
-- Unique constraints became unique indexes created at startup: `username`,
-  `token`, and the partial `users_auth0_sub_unique` on `auth0_sub`.
+- Unique constraints became unique indexes created at startup: `username` and
+  `token` on the `users` collection.
 - Terraform gives the main App Service a system-assigned identity and resolves
   `MONGODB_URI` from the Key Vault secret `mongodb-uri-app`;
   `MONGODB_DB_NAME` comes from the `app_mongodb_db_name` input (default
   `tomoyard`). `SQLITE_JOURNAL` is gone.
-- The Auth0 legacy-migration scripts (`export-auth0-users.js`,
-  `backfill-auth0-subjects.js`) now target MongoDB via `--uri`/`--db-name` (or
-  the `MONGODB_URI`/`MONGODB_DB_NAME` environment variables).
+- User credentials (`pass_hash`, `salt`, `token`) migrate verbatim, so the
+  self-hosted username/password sign-in keeps working against the migrated rows
+  with no re-registration.
 
 ## One-time production cutover
 

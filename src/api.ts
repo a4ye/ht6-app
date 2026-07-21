@@ -59,15 +59,6 @@ async function call<T>(
   return json as T;
 }
 
-export type AuthProfileInput = {
-  username: string;
-  name: string;
-  birthday: string;
-  color: string;
-  species: string;
-  interests: string[];
-};
-
 export function makeApi(serverUrl: string, tokenSource: AccessTokenSource) {
   return {
     register: (b: {
@@ -77,9 +68,6 @@ export function makeApi(serverUrl: string, tokenSource: AccessTokenSource) {
       call<{ token: string; me: Me }>(serverUrl, null, 'POST', '/auth/register', b),
     login: (b: { username: string; password: string }) =>
       call<{ token: string; me: Me }>(serverUrl, null, 'POST', '/auth/login', b),
-    authProfile: () => call<{ me: Me | null }>(serverUrl, tokenSource, 'GET', '/auth/profile'),
-    saveAuthProfile: (body: AuthProfileInput) =>
-      call<{ me: Me }>(serverUrl, tokenSource, 'PUT', '/auth/profile', body),
     me: () => call<{ me: Me }>(serverUrl, tokenSource, 'GET', '/me'),
     setAvatar: (b: { color: string; equipped: string[]; species: string }) =>
       call<{ me: Me }>(serverUrl, tokenSource, 'PUT', '/me/avatar', b),

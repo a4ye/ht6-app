@@ -59,32 +59,6 @@ variable "app_mongodb_db_name" {
   }
 }
 
-variable "auth0_issuer_base_url" {
-  description = "Auth0 tenant issuer URL, for example https://tenant.eu.auth0.com."
-  type        = string
-
-  validation {
-    condition     = startswith(var.auth0_issuer_base_url, "https://")
-    error_message = "auth0_issuer_base_url must be an HTTPS URL."
-  }
-}
-
-variable "auth0_audience" {
-  description = "Auth0 API identifier accepted by the main server."
-  type        = string
-
-  validation {
-    condition     = length(trimspace(var.auth0_audience)) > 0
-    error_message = "auth0_audience must not be empty."
-  }
-}
-
-variable "allow_legacy_auth" {
-  description = "Temporarily accept legacy app tokens while Auth0 rolls out. Keep false in production."
-  type        = bool
-  default     = false
-}
-
 variable "crypto_enabled" {
   description = "Expose the crypto service to the main server only after the service passes /ready."
   type        = bool
@@ -170,11 +144,6 @@ resource "azurerm_linux_web_app" "app" {
     # don't wipe them. Durable application data lives in MongoDB Atlas.
     DATA_DIR                     = "/home/data"
     WEBSITE_NODE_DEFAULT_VERSION = "~22"
-    # Auth0 validates API access on the main server. Legacy tokens stay off by
-    # default and can only be re-enabled through an explicit Terraform input.
-    AUTH0_ISSUER_BASE_URL = var.auth0_issuer_base_url
-    AUTH0_AUDIENCE        = var.auth0_audience
-    ALLOW_LEGACY_AUTH     = tostring(var.allow_legacy_auth)
     # Social data (users/friends/hangouts) lives in its own Atlas database with
     # its own least-privilege database user; the secret value is managed
     # outside Terraform, like every other Key Vault secret here.

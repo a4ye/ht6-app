@@ -17,10 +17,6 @@ write_files:
       # whose cloud-init custom_data no longer changes.
       set -euo pipefail
       : "${SHA:?}" "${GH_TOKEN:?}" "${KUDU_USER:?}" "${KUDU_PASS:?}" "${KEYSTORE_B64:?}" "${KEYSTORE_PASS:?}"
-      : "${EXPO_PUBLIC_AUTH0_DOMAIN:?}" "${EXPO_PUBLIC_AUTH0_CLIENT_ID:?}"
-      : "${EXPO_PUBLIC_AUTH0_WEB_CLIENT_ID:?}" "${EXPO_PUBLIC_AUTH0_AUDIENCE:?}"
-      export EXPO_PUBLIC_AUTH0_DOMAIN EXPO_PUBLIC_AUTH0_CLIENT_ID
-      export EXPO_PUBLIC_AUTH0_WEB_CLIENT_ID EXPO_PUBLIC_AUTH0_AUDIENCE
       export ANDROID_HOME=/opt/android-sdk
       export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
       export PATH="$JAVA_HOME/bin:$PATH"
